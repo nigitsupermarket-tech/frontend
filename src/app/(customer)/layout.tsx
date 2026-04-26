@@ -52,7 +52,7 @@ export default function AccountLayout({
 
         if (restored) {
           setIsReady(true);
-          useWishlistSync();
+          syncWishlist();
         } else {
           router.replace("/login?redirect=/account");
         }
@@ -85,7 +85,7 @@ export default function AccountLayout({
 }
 
 // Trigger wishlist fetch once after session restore without re-rendering layout
-function useWishlistSync() {
+function syncWishlist() {
   try {
     // Dynamic import to avoid circular deps at module init time
     import("@/store/wishlistStore").then(({ useWishlistStore }) => {
