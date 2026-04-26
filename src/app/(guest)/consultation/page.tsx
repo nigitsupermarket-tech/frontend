@@ -1,0 +1,10 @@
+// (guest)/consultation/page.tsx — redirects to contact
+"use client";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function ConsultationPage() {
+  const router = useRouter();
+  useEffect(() => { router.replace("/contact"); }, [router]);
+  return null;
+}
