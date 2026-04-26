@@ -3,11 +3,6 @@
 import { useSettings } from "@/hooks/useSettings";
 import { formatDate } from "@/lib/utils";
 
-// ✅ FIX: Removed `if (isLoading) return <PageLoader />`.
-// That guard blocked the entire page render on every client-side navigation.
-// These pages have hardcoded defaults so they render correctly even before
-// settings are fetched. The settings just override the defaults when ready.
-
 const DEFAULT_TERMS_CONTENT = `
 <h2>Agreement to Terms</h2>
 <p>By accessing and using Nigittriple Industry, you accept and agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our services.</p>

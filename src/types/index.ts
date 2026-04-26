@@ -1,6 +1,3 @@
-// NOTE: cartStore logic does NOT belong here.
-// This file is types only. Keep cartStore in src/store/cartStore.ts
-
 // ============================================
 // USER TYPES
 // ============================================
@@ -372,7 +369,7 @@ export interface SiteSettings {
   secondaryColor?: string;
   accentColor?: string;
 
-  // Contact
+  // Contact (generic)
   email?: string;
   phone?: string;
   address?: string;
@@ -400,6 +397,30 @@ export interface SiteSettings {
 
   // Pricing visibility
   hidePricing?: boolean;
+
+  // ── Contact page ──────────────────────────────────────────────────────────
+  contactTitle?: string;
+  contactSubtitle?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  contactWhatsapp?: string;
+  contactAddress?: string;
+  contactMap?: string; // Google Maps embed URL
+  contactHours?: Record<string, string>; // e.g. { monday: "9am - 5pm" }
+
+  // ── Terms of Service page ─────────────────────────────────────────────────
+  termsTitle?: string;
+  termsContent?: string; // HTML string
+  termsLastUpdated?: string;
+
+  // ── Privacy Policy page ───────────────────────────────────────────────────
+  privacyTitle?: string;
+  privacyContent?: string; // HTML string
+  privacyLastUpdated?: string;
+
+  // ── Homepage hero / banners ───────────────────────────────────────────────
+  heroSlides?: any[];
+  heroBanners?: any[];
 
   createdAt?: string;
   updatedAt?: string;

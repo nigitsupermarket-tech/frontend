@@ -17,6 +17,7 @@ import {
   ShopByCategory,
   CatalogueCTA,
 } from "../_components/home";
+import { NewsletterSection } from "../_components/home/newsletter-section";
 
 export default function HomePage() {
   return (
@@ -29,6 +30,7 @@ export default function HomePage() {
       <NewArrivals />
       <CatalogueCTA />
       <ServicesCTA />
+      <NewsletterSection />
     </div>
   );
 }

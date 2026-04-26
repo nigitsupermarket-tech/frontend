@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   Mail,
@@ -11,6 +12,7 @@ import {
   Linkedin,
 } from "lucide-react";
 import { useSettings } from "@/hooks/useSettings";
+import { apiPost } from "@/lib/api";
 
 const shopLinks = [
   { label: "All Products", href: "/products" },
@@ -41,6 +43,30 @@ export function Footer() {
   const { settings } = useSettings();
 
   const siteName = (settings as any).siteName || "Nigittriple Industry";
+
+  // ✅ Footer newsletter subscription
+  const [footerEmail, setFooterEmail] = useState("");
+  const [footerStatus, setFooterStatus] = useState<
+    "idle" | "loading" | "done" | "error"
+  >("idle");
+
+  const handleFooterSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!footerEmail.trim()) return;
+    setFooterStatus("loading");
+    try {
+      await apiPost("/subscribe", {
+        email: footerEmail.trim(),
+        source: "footer",
+      });
+      setFooterStatus("done");
+      setFooterEmail("");
+      setTimeout(() => setFooterStatus("idle"), 4000);
+    } catch {
+      setFooterStatus("error");
+      setTimeout(() => setFooterStatus("idle"), 3000);
+    }
+  };
 
   const socialLinks = [
     {
@@ -225,19 +251,35 @@ export function Footer() {
               <p className="text-sm font-medium text-white mb-2">
                 Stay updated
               </p>
-              <form className="flex gap-2" onSubmit={(e) => e.preventDefault()}>
-                <input
-                  type="email"
-                  placeholder="Your email"
-                  className="flex-1 px-3 py-2 bg-green-700 border border-green-600 rounded-lg text-sm text-white placeholder:text-green-400 focus:outline-none focus:border-amber-400 transition-colors"
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-2 bg-amber-400 text-gray-900 rounded-lg text-sm font-bold hover:bg-amber-500 transition-colors"
-                >
-                  →
-                </button>
-              </form>
+              {footerStatus === "done" ? (
+                <p className="text-sm text-amber-400 font-medium py-2">
+                  ✓ You're subscribed!
+                </p>
+              ) : (
+                <form className="flex gap-2" onSubmit={handleFooterSubscribe}>
+                  <input
+                    type="email"
+                    required
+                    value={footerEmail}
+                    onChange={(e) => setFooterEmail(e.target.value)}
+                    placeholder="Your email"
+                    disabled={footerStatus === "loading"}
+                    className="flex-1 px-3 py-2 bg-green-700 border border-green-600 rounded-lg text-sm text-white placeholder:text-green-400 focus:outline-none focus:border-amber-400 transition-colors disabled:opacity-60"
+                  />
+                  <button
+                    type="submit"
+                    disabled={footerStatus === "loading"}
+                    className="px-3 py-2 bg-amber-400 text-gray-900 rounded-lg text-sm font-bold hover:bg-amber-500 transition-colors disabled:opacity-60"
+                  >
+                    {footerStatus === "loading" ? "…" : "→"}
+                  </button>
+                </form>
+              )}
+              {footerStatus === "error" && (
+                <p className="text-xs text-red-400 mt-1">
+                  Something went wrong. Try again.
+                </p>
+              )}
             </div>
           </div>
         </div>

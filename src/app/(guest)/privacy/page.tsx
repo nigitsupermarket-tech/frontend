@@ -3,9 +3,6 @@
 import { useSettings } from "@/hooks/useSettings";
 import { formatDate } from "@/lib/utils";
 
-// ✅ FIX: Removed `if (isLoading) return <PageLoader />`.
-// See terms/page.tsx for the full explanation.
-
 const DEFAULT_PRIVACY_CONTENT = `
 <h2>Introduction</h2>
 <p>Nigittriple Industry ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website or make a purchase from us.</p>
