@@ -266,6 +266,7 @@ export interface Order {
   items: OrderItem[];
   shippingAddress?: OrderShippingAddress;
   trackingNumber?: string;
+  trackingUrl?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;

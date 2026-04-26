@@ -9,6 +9,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useCartStore } from "@/store/cartStore";
 import { LogIn, UserPlus, ShoppingCart, Loader2 } from "lucide-react";
 import CheckoutPageContent from "./checkout-content";
+import Link from "next/link";
 
 export default function CheckoutPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
@@ -39,25 +40,26 @@ export default function CheckoutPage() {
           </p>
           {guestItems.length > 0 && (
             <p className="text-green-700 text-sm font-medium mb-6">
-              ✓ Your {guestItems.length} cart item{guestItems.length !== 1 ? "s" : ""} will be saved
+              ✓ Your {guestItems.length} cart item
+              {guestItems.length !== 1 ? "s" : ""} will be saved
             </p>
           )}
 
           <div className="space-y-3">
-            <a
+            <Link
               href="/login?redirect=/checkout"
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors"
             >
               <LogIn className="w-4 h-4" />
               Sign In
-            </a>
-            <a
+            </Link>
+            <Link
               href="/register?redirect=/checkout"
               className="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-green-600 text-green-700 font-semibold rounded-xl hover:bg-green-50 transition-colors"
             >
               <UserPlus className="w-4 h-4" />
               Create Account
-            </a>
+            </Link>
           </div>
 
           <button

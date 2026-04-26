@@ -8,6 +8,7 @@ import { apiGet } from "@/lib/api";
 import { Product } from "@/types";
 import { ProductCard } from "@/components/customer/product-card";
 import { Loader2, Tag } from "lucide-react";
+import Link from "next/link";
 
 export function PromotionsOfTheWeek() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -47,13 +48,13 @@ export function PromotionsOfTheWeek() {
 
         {!loading && products.length > 0 && (
           <div className="text-center mt-8">
-            <a
+            <Link
               href="/products?isOnPromotion=true"
               className="inline-flex items-center gap-2 px-6 py-2.5 border-2 border-green-600 text-green-700 font-semibold text-sm rounded hover:bg-green-600 hover:text-white transition-colors uppercase tracking-wide"
             >
               <Tag className="w-4 h-4" />
               View All Promotions
-            </a>
+            </Link>
           </div>
         )}
       </div>

@@ -21,6 +21,7 @@ import { apiGet, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatPrice } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 interface POSOrderItem {
   id: string;
@@ -214,13 +215,13 @@ export default function POSOrdersPage() {
           <p className="text-sm text-gray-500 mt-0.5">In-store sales history</p>
         </div>
         <div className="flex items-center gap-2">
-          <a
+          <Link
             href="/admin/pos"
             className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-gray-900 font-bold rounded-lg text-sm"
           >
             <Monitor className="w-4 h-4" />
             Open POS
-          </a>
+          </Link>
           <button
             onClick={fetchOrders}
             className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"

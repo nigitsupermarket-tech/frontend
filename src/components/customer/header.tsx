@@ -257,25 +257,25 @@ function PreHeader() {
         {/* Left: contact info */}
         <div className="flex items-center gap-4">
           {(s.contactPhone || s.phone) && (
-            <a
+            <Link
               href={`tel:${s.contactPhone || s.phone}`}
               className="flex items-center gap-1.5 hover:text-white transition-colors"
             >
               <Phone className="w-3 h-3" />
               {s.contactPhone || s.phone}
-            </a>
+            </Link>
           )}
           {(s.contactEmail || s.email) && (
-            <a
+            <Link
               href={`mailto:${s.contactEmail || s.email}`}
               className="flex items-center gap-1.5 hover:text-white transition-colors"
             >
               <Mail className="w-3 h-3" />
               {s.contactEmail || s.email}
-            </a>
+            </Link>
           )}
           {s.contactWhatsapp && (
-            <a
+            <Link
               href={`https://wa.me/${s.contactWhatsapp.replace(/[^0-9]/g, "")}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -283,7 +283,7 @@ function PreHeader() {
             >
               <MessageCircle className="w-3 h-3" />
               WhatsApp
-            </a>
+            </Link>
           )}
         </div>
 
@@ -309,7 +309,7 @@ function PreHeader() {
           {socials.length > 0 && (
             <div className="flex items-center gap-2 border-l border-green-700 pl-4">
               {socials.map(({ icon: Icon, href, label }) => (
-                <a
+                <Link
                   key={label}
                   href={href}
                   target="_blank"
@@ -318,7 +318,7 @@ function PreHeader() {
                   className="hover:text-white transition-colors"
                 >
                   <Icon className="w-3.5 h-3.5" />
-                </a>
+                </Link>
               ))}
             </div>
           )}

@@ -1,10 +1,11 @@
 // components/WhatsAppChat.tsx
+import Link from "next/link";
 import React from "react";
 import { BsWhatsapp } from "react-icons/bs";
 
 const WhatsAppChat: React.FC = () => {
   return (
-    <a
+    <Link
       href="https://wa.me/2349169776138?text=Hello,%20I'd%20like%20to%20place%20an%20order..."
       target="_blank"
       rel="noopener noreferrer"
@@ -12,7 +13,7 @@ const WhatsAppChat: React.FC = () => {
       aria-label="Chat on WhatsApp"
     >
       <BsWhatsapp className="text-3xl" />
-    </a>
+    </Link>
   );
 };
 
