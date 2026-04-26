@@ -173,3 +173,17 @@ export const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   comment: z.string().min(10, "Please write at least 10 characters").optional(),
 });
+
+// ─── Inferred form types ──────────────────────────────────────────────────────
+// Exported so pages can import them directly without re-deriving with z.infer<>
+export type LoginForm = z.infer<typeof loginSchema>;
+export type RegisterForm = z.infer<typeof registerSchema>;
+export type ForgotPasswordForm = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
+export type UpdatePasswordForm = z.infer<typeof updatePasswordSchema>;
+export type AddressForm = z.infer<typeof addressSchema>;
+export type CheckoutForm = z.infer<typeof checkoutSchema>;
+export type ProductForm = z.infer<typeof productSchema>;
+export type CategoryForm = z.infer<typeof categorySchema>;
+export type BrandForm = z.infer<typeof brandSchema>;
+export type ReviewForm = z.infer<typeof reviewSchema>;
