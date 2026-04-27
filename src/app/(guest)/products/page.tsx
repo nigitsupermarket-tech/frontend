@@ -127,7 +127,6 @@ function PriceSlider({
             right: `${100 - pct(value[1])}%`,
           }}
         />
-        {/* Min thumb */}
         <input
           type="range"
           min={min}
@@ -140,7 +139,6 @@ function PriceSlider({
           className="absolute inset-0 w-full opacity-0 h-full cursor-pointer"
           style={{ zIndex: value[0] > max - (max - min) * 0.1 ? 5 : 3 }}
         />
-        {/* Max thumb */}
         <input
           type="range"
           min={min}
@@ -166,13 +164,46 @@ function PriceSlider({
   );
 }
 
+// ─── Build URL helper ─────────────────────────────────────────────────────────
+function buildUrl(filters: {
+  categorySlug?: string;
+  brandSlugs?: string[];
+  sort?: string;
+  limit?: number;
+  search?: string;
+  isOnPromotion?: boolean;
+  page?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  maxPriceCap?: number;
+}) {
+  const p = new URLSearchParams();
+  if (filters.categorySlug) p.set("categorySlug", filters.categorySlug);
+  if (filters.brandSlugs?.length)
+    p.set("brandSlug", filters.brandSlugs.join(","));
+  if (filters.sort && filters.sort !== "default") p.set("sort", filters.sort);
+  if (filters.limit && filters.limit !== 30)
+    p.set("limit", String(filters.limit));
+  if (filters.search) p.set("search", filters.search);
+  if (filters.isOnPromotion) p.set("isOnPromotion", "true");
+  if (filters.page && filters.page > 1) p.set("page", String(filters.page));
+  if (filters.minPrice && filters.minPrice > 0)
+    p.set("minPrice", String(filters.minPrice));
+  if (
+    filters.maxPrice !== undefined &&
+    filters.maxPriceCap !== undefined &&
+    filters.maxPrice < filters.maxPriceCap
+  )
+    p.set("maxPrice", String(filters.maxPrice));
+  const qs = p.toString();
+  return `/products${qs ? `?${qs}` : ""}`;
+}
+
 // ─── Main content ─────────────────────────────────────────────────────────────
 function ProductsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // ✅ FIX 3: Use global cached product store instead of local state.
-  // Products are fetched once and reused across all pages.
   const {
     products,
     pagination,
@@ -182,99 +213,57 @@ function ProductsContent() {
 
   const [categories, setCategories] = useState<CategoryWithChildren[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(),
   );
+  // Price slider local state — synced from URL on mount and URL changes
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 500000]);
-  const [maxPrice, setMaxPrice] = useState(500000);
+  const MAX_PRICE = 500000;
   const [priceOpen, setPriceOpen] = useState(true);
   const [brandOpen, setBrandOpen] = useState(true);
 
-  // Filter state — use slug for SEO-friendly URLs
-  const [selectedCategorySlug, setSelectedCategorySlug] = useState(
-    searchParams.get("categorySlug") || searchParams.get("categoryId") || "",
-  );
+  // ── Read ALL filter values directly from searchParams ─────────────────────
+  // No state copies — always fresh from the URL. Every filter interaction
+  // calls router.push() which updates searchParams which triggers re-render.
+  const categorySlug =
+    searchParams.get("categorySlug") || searchParams.get("categoryId") || "";
+  const brandSlugs = (() => {
+    const p =
+      searchParams.get("brandSlug") || searchParams.get("brandId") || "";
+    return p ? p.split(",").filter(Boolean) : [];
+  })();
+  const selectedSort = searchParams.get("sort") || "default";
+  const selectedLimit = Number(searchParams.get("limit")) || 30;
+  const searchValue = searchParams.get("search") || "";
+  const isOnPromotion = searchParams.get("isOnPromotion") === "true";
+  const currentPage = Number(searchParams.get("page")) || 1;
+  const urlMinPrice = Number(searchParams.get("minPrice")) || 0;
+  const urlMaxPrice = Number(searchParams.get("maxPrice")) || MAX_PRICE;
 
-  // ✅ FIX 2: Multi-select brand — store as string[] (slug or id)
-  const [selectedBrandSlugs, setSelectedBrandSlugs] = useState<string[]>(() => {
-    const param = searchParams.get("brandSlug") || searchParams.get("brandId");
-    return param ? param.split(",").filter(Boolean) : [];
-  });
-
-  const [selectedSort, setSelectedSort] = useState(
-    searchParams.get("sort") || "default",
-  );
-  const [selectedLimit, setSelectedLimit] = useState(
-    Number(searchParams.get("limit")) || 30,
-  );
-  const [search, setSearch] = useState(searchParams.get("search") || "");
-  const [isOnPromotion, setIsOnPromotion] = useState(
-    searchParams.get("isOnPromotion") === "true",
-  );
-  const [currentPage, setCurrentPage] = useState(
-    Number(searchParams.get("page")) || 1,
-  );
-  const [pageTitle, setPageTitle] = useState("All Products");
-
-  const buildQuery = useCallback(() => {
-    const params = new URLSearchParams();
-    if (selectedCategorySlug) params.set("categorySlug", selectedCategorySlug);
-    if (selectedBrandSlugs.length > 0)
-      params.set("brandSlug", selectedBrandSlugs.join(","));
-    if (selectedSort && selectedSort !== "default")
-      params.set("sort", selectedSort);
-    if (selectedLimit !== 30) params.set("limit", String(selectedLimit));
-    if (search) params.set("search", search);
-    if (isOnPromotion) params.set("isOnPromotion", "true");
-    if (currentPage > 1) params.set("page", String(currentPage));
-    if (priceRange[0] > 0) params.set("minPrice", String(priceRange[0]));
-    if (priceRange[1] < maxPrice) params.set("maxPrice", String(priceRange[1]));
-    params.set("status", "ACTIVE");
-    return params.toString();
-  }, [
-    selectedCategorySlug,
-    selectedBrandSlugs,
-    selectedSort,
-    selectedLimit,
-    search,
-    isOnPromotion,
-    currentPage,
-    priceRange,
-    maxPrice,
-  ]);
-
-  // ✅ FIX: Sync URL so browser bar reflects current filters (SEO-friendly slugs)
+  // Sync price slider with URL
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (selectedCategorySlug) params.set("categorySlug", selectedCategorySlug);
-    if (selectedBrandSlugs.length > 0)
-      params.set("brandSlug", selectedBrandSlugs.join(","));
-    if (selectedSort && selectedSort !== "default")
-      params.set("sort", selectedSort);
-    if (selectedLimit !== 30) params.set("limit", String(selectedLimit));
-    if (search) params.set("search", search);
-    if (isOnPromotion) params.set("isOnPromotion", "true");
-    if (currentPage > 1) params.set("page", String(currentPage));
-    if (priceRange[0] > 0) params.set("minPrice", String(priceRange[0]));
-    if (priceRange[1] < maxPrice) params.set("maxPrice", String(priceRange[1]));
-    const qs = params.toString();
-    router.replace(`/products${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [
-    selectedCategorySlug,
-    selectedBrandSlugs,
-    selectedSort,
-    selectedLimit,
-    search,
-    isOnPromotion,
-    currentPage,
-    priceRange,
-    maxPrice,
-    router,
-  ]);
+    setPriceRange([urlMinPrice, urlMaxPrice]);
+  }, [urlMinPrice, urlMaxPrice]);
 
-  // Load categories + brands (these are light lists, not products)
+  // ── Fetch products whenever searchParams changes ───────────────────────────
+  // Query is built directly here — no stale closure risk.
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (categorySlug) p.set("categorySlug", categorySlug);
+    if (brandSlugs.length) p.set("brandSlug", brandSlugs.join(","));
+    if (selectedSort && selectedSort !== "default") p.set("sort", selectedSort);
+    p.set("limit", String(selectedLimit));
+    if (searchValue) p.set("search", searchValue);
+    if (isOnPromotion) p.set("isOnPromotion", "true");
+    if (currentPage > 1) p.set("page", String(currentPage));
+    if (urlMinPrice > 0) p.set("minPrice", String(urlMinPrice));
+    if (urlMaxPrice < MAX_PRICE) p.set("maxPrice", String(urlMaxPrice));
+    p.set("status", "ACTIVE");
+    fetchProducts(p.toString());
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load categories + brands once ─────────────────────────────────────────
   useEffect(() => {
     apiGet<any>("/categories?isActive=true").then((res) => {
       const all: any[] = res.data.categories || [];
@@ -289,22 +278,16 @@ function ProductsContent() {
       setCategories(roots);
     });
     apiGet<any>("/brands?isActive=true&limit=100")
-      .then((res) => {
-        setBrands(res.data.brands || []);
-      })
+      .then((res) => setBrands(res.data.brands || []))
       .catch(() => {});
   }, []);
 
-  // Page title
-  useEffect(() => {
-    if (!selectedCategorySlug) {
-      setPageTitle(isOnPromotion ? "Promotions" : "All Products");
-      return;
-    }
+  // ── Page title (derived — no state) ──────────────────────────────────────
+  const pageTitle = (() => {
+    if (!categorySlug) return isOnPromotion ? "Promotions" : "All Products";
     const find = (cats: CategoryWithChildren[]): string | null => {
       for (const c of cats) {
-        if (c.slug === selectedCategorySlug || c.id === selectedCategorySlug)
-          return c.name;
+        if (c.slug === categorySlug || c.id === categorySlug) return c.name;
         if (c.children?.length) {
           const f = find(c.children);
           if (f) return f;
@@ -312,14 +295,39 @@ function ProductsContent() {
       }
       return null;
     };
-    const name = find(categories);
-    if (name) setPageTitle(name);
-  }, [selectedCategorySlug, categories, isOnPromotion]);
+    return find(categories) || "Products";
+  })();
 
-  // ✅ FIX 3: Fetch via global store so results are cached.
-  useEffect(() => {
-    fetchProducts(buildQuery());
-  }, [buildQuery, fetchProducts]);
+  // ── Current filters snapshot for buildUrl ─────────────────────────────────
+  const current = {
+    categorySlug,
+    brandSlugs,
+    sort: selectedSort,
+    limit: selectedLimit,
+    search: searchValue,
+    isOnPromotion,
+    page: currentPage,
+    minPrice: priceRange[0],
+    maxPrice: priceRange[1],
+    maxPriceCap: MAX_PRICE,
+  };
+
+  const navigate = (overrides: Partial<typeof current>) =>
+    router.push(buildUrl({ ...current, ...overrides }));
+
+  const selectCategory = (slug: string) => {
+    router.push(buildUrl({ ...current, categorySlug: slug, page: 1 }));
+    setSidebarOpen(false);
+  };
+
+  const toggleBrand = (slug: string) => {
+    const next = brandSlugs.includes(slug)
+      ? brandSlugs.filter((b) => b !== slug)
+      : [...brandSlugs, slug];
+    navigate({ brandSlugs: next, page: 1 });
+  };
+
+  const clearBrands = () => navigate({ brandSlugs: [], page: 1 });
 
   const toggleCategory = (id: string) => {
     setExpandedCategories((prev) => {
@@ -329,30 +337,10 @@ function ProductsContent() {
     });
   };
 
-  const selectCategory = (slug: string) => {
-    setSelectedCategorySlug(slug);
-    setCurrentPage(1);
-    setSidebarOpen(false);
-  };
-
-  // ✅ FIX 2: Toggle brand slug in/out of the selectedBrandSlugs array.
-  const toggleBrand = (slug: string) => {
-    setSelectedBrandSlugs((prev) =>
-      prev.includes(slug) ? prev.filter((b) => b !== slug) : [...prev, slug],
-    );
-    setCurrentPage(1);
-  };
-
-  const clearBrands = () => {
-    setSelectedBrandSlugs([]);
-    setCurrentPage(1);
-  };
-
   const renderCategoryItem = (cat: CategoryWithChildren, depth = 0) => {
     const hasChildren = cat.children && cat.children.length > 0;
     const isExpanded = expandedCategories.has(cat.id);
-    const isSelected =
-      selectedCategorySlug === cat.slug || selectedCategorySlug === cat.id;
+    const isSelected = categorySlug === cat.slug || categorySlug === cat.id;
     return (
       <div key={cat.id}>
         <button
@@ -390,6 +378,55 @@ function ProductsContent() {
     );
   };
 
+  // ── Active filter chips ────────────────────────────────────────────────────
+  const selectedBrandNames = brandSlugs
+    .map((slug) => brands.find((b) => b.slug === slug)?.name)
+    .filter(Boolean)
+    .join(", ");
+
+  // Resolve category name for the active filter chip
+  const activeCategoryName = (() => {
+    if (!categorySlug) return null;
+    const find = (cats: CategoryWithChildren[]): string | null => {
+      for (const c of cats) {
+        if (c.slug === categorySlug || c.id === categorySlug) return c.name;
+        if (c.children?.length) {
+          const f = find(c.children);
+          if (f) return f;
+        }
+      }
+      return null;
+    };
+    return find(categories) || categorySlug;
+  })();
+
+  const activeFilters = [
+    categorySlug &&
+      activeCategoryName && {
+        label: `Category: ${activeCategoryName}`,
+        clear: () => navigate({ categorySlug: "", page: 1 }),
+      },
+    isOnPromotion && {
+      label: "Promotions",
+      clear: () => navigate({ isOnPromotion: false, page: 1 }),
+    },
+    brandSlugs.length > 0 && {
+      label: `Brand: ${selectedBrandNames}`,
+      clear: clearBrands,
+    },
+    searchValue && {
+      label: `"${searchValue}"`,
+      clear: () => navigate({ search: "", page: 1 }),
+    },
+    (priceRange[0] > 0 || priceRange[1] < MAX_PRICE) && {
+      label: `₦${priceRange[0].toLocaleString()} – ₦${priceRange[1].toLocaleString()}`,
+      clear: () => {
+        setPriceRange([0, MAX_PRICE]);
+        navigate({ minPrice: 0, maxPrice: MAX_PRICE, page: 1 });
+      },
+    },
+  ].filter(Boolean) as { label: string; clear: () => void }[];
+
   const Sidebar = () => (
     <aside className="w-64 flex-shrink-0 space-y-3">
       {/* Categories */}
@@ -404,7 +441,7 @@ function ProductsContent() {
             onClick={() => selectCategory("")}
             className={cn(
               "w-full text-left py-1.5 text-sm font-medium transition-colors flex items-center gap-2",
-              !selectedCategorySlug
+              !categorySlug
                 ? "text-green-700"
                 : "text-gray-700 hover:text-green-700",
             )}
@@ -413,11 +450,9 @@ function ProductsContent() {
             All Products
           </button>
           <button
-            onClick={() => {
-              setIsOnPromotion(true);
-              setSelectedCategorySlug("");
-              setCurrentPage(1);
-            }}
+            onClick={() =>
+              navigate({ isOnPromotion: true, categorySlug: "", page: 1 })
+            }
             className={cn(
               "w-full text-left py-1.5 text-sm font-medium transition-colors flex items-center gap-2",
               isOnPromotion
@@ -452,18 +487,18 @@ function ProductsContent() {
           <div className="p-4">
             <PriceSlider
               min={0}
-              max={maxPrice}
+              max={MAX_PRICE}
               value={priceRange}
               onChange={(v) => {
                 setPriceRange(v);
-                setCurrentPage(1);
+                navigate({ minPrice: v[0], maxPrice: v[1], page: 1 });
               }}
             />
           </div>
         )}
       </div>
 
-      {/* ✅ FIX 2: Multi-select brand filter with checkboxes */}
+      {/* Brand filter */}
       {brands.length > 0 && (
         <div className="bg-white border border-gray-200">
           <button
@@ -474,9 +509,9 @@ function ProductsContent() {
               <h3 className="font-bold text-gray-900 uppercase text-xs tracking-widest">
                 Brand
               </h3>
-              {selectedBrandSlugs.length > 0 && (
+              {brandSlugs.length > 0 && (
                 <span className="bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                  {selectedBrandSlugs.length}
+                  {brandSlugs.length}
                 </span>
               )}
             </div>
@@ -489,7 +524,7 @@ function ProductsContent() {
           </button>
           {brandOpen && (
             <div className="p-3">
-              {selectedBrandSlugs.length > 0 && (
+              {brandSlugs.length > 0 && (
                 <button
                   onClick={clearBrands}
                   className="w-full text-left text-xs text-green-700 hover:text-green-900 font-medium mb-2 px-1"
@@ -499,7 +534,7 @@ function ProductsContent() {
               )}
               <div className="max-h-64 overflow-y-auto space-y-0.5">
                 {brands.map((brand) => {
-                  const isSelected = selectedBrandSlugs.includes(brand.slug);
+                  const isSelected = brandSlugs.includes(brand.slug);
                   return (
                     <button
                       key={brand.id}
@@ -511,7 +546,6 @@ function ProductsContent() {
                           : "text-gray-700 hover:text-green-700",
                       )}
                     >
-                      {/* Checkbox indicator */}
                       <span
                         className={cn(
                           "w-4 h-4 flex-shrink-0 border rounded flex items-center justify-center transition-colors",
@@ -538,30 +572,6 @@ function ProductsContent() {
       )}
     </aside>
   );
-
-  // ✅ FIX 2: Active filters now handles multiple brands.
-  const selectedBrandNames = selectedBrandSlugs
-    .map((slug) => brands.find((b) => b.slug === slug)?.name)
-    .filter(Boolean)
-    .join(", ");
-
-  const activeFilters = [
-    isOnPromotion && {
-      label: "Promotions",
-      clear: () => setIsOnPromotion(false),
-    },
-    selectedBrandSlugs.length > 0 && {
-      label: `Brand: ${selectedBrandNames}`,
-      clear: clearBrands,
-    },
-    search && { label: `"${search}"`, clear: () => setSearch("") },
-    (priceRange[0] > 0 || priceRange[1] < maxPrice) && {
-      label: `₦${priceRange[0].toLocaleString()} – ₦${priceRange[1].toLocaleString()}`,
-      clear: () => setPriceRange([0, maxPrice]),
-    },
-  ].filter(Boolean) as { label: string; clear: () => void }[];
-
-  const isLoadingProducts = storeLoading || loading;
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -599,9 +609,9 @@ function ProductsContent() {
               >
                 <Filter className="w-4 h-4" />
                 Filters
-                {selectedBrandSlugs.length > 0 && (
+                {brandSlugs.length > 0 && (
                   <span className="bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                    {selectedBrandSlugs.length}
+                    {brandSlugs.length}
                   </span>
                 )}
               </button>
@@ -610,13 +620,21 @@ function ProductsContent() {
                 <input
                   type="text"
                   placeholder="Search products..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  defaultValue={searchValue}
+                  key={searchValue}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter")
+                      navigate({
+                        search: (e.target as HTMLInputElement).value,
+                        page: 1,
+                      });
+                  }}
+                  onBlur={(e) => navigate({ search: e.target.value, page: 1 })}
                   className="w-full pl-9 pr-8 py-1.5 text-sm border border-gray-300 focus:outline-none focus:border-green-500"
                 />
-                {search && (
+                {searchValue && (
                   <button
-                    onClick={() => setSearch("")}
+                    onClick={() => navigate({ search: "", page: 1 })}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -628,7 +646,9 @@ function ProductsContent() {
                   <span className="text-xs text-gray-500">sort:</span>
                   <select
                     value={selectedSort}
-                    onChange={(e) => setSelectedSort(e.target.value)}
+                    onChange={(e) =>
+                      navigate({ sort: e.target.value, page: 1 })
+                    }
                     className="text-sm border border-gray-300 px-2 py-1.5 focus:outline-none focus:border-green-500 bg-white"
                   >
                     <option value="default">Default</option>
@@ -642,7 +662,9 @@ function ProductsContent() {
                   <span className="text-xs text-gray-500">Show:</span>
                   <select
                     value={selectedLimit}
-                    onChange={(e) => setSelectedLimit(Number(e.target.value))}
+                    onChange={(e) =>
+                      navigate({ limit: Number(e.target.value), page: 1 })
+                    }
                     className="text-sm border border-gray-300 px-2 py-1.5 focus:outline-none focus:border-green-500 bg-white"
                   >
                     <option value={12}>12</option>
@@ -669,7 +691,7 @@ function ProductsContent() {
             )}
 
             {/* Products grid */}
-            {isLoadingProducts ? (
+            {storeLoading ? (
               <div className="flex justify-center py-20">
                 <Loader2 className="w-8 h-8 animate-spin text-green-600" />
               </div>
@@ -692,7 +714,7 @@ function ProductsContent() {
                 <Pagination
                   current={currentPage}
                   total={pagination?.totalPages ?? 1}
-                  onChange={setCurrentPage}
+                  onChange={(p) => navigate({ page: p })}
                 />
               </>
             )}

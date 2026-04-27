@@ -41,7 +41,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     const init = async () => {
       try {
-        await useAuthStore.getState().checkAuth();
+        // ✅ SESSION FIX: Always try silentRefresh first — it reads the 30-day
+        // httpOnly refresh cookie and issues fresh tokens without requiring the
+        // 15-min access token to still be valid. This is what keeps users logged
+        // in for up to 30 days (rolling). checkAuth() alone fails after 15 min
+        // because it hits /auth/me with an expired access token first.
+        const restored = await useAuthStore.getState().silentRefresh();
+        if (!restored) {
+          // Silent refresh failed (no cookie / expired) — fall back to
+          // checking localStorage token as a last resort
+          await useAuthStore.getState().checkAuth();
+        }
       } catch {
         // Guest — fine
       } finally {
