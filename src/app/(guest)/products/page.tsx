@@ -192,14 +192,14 @@ function ProductsContent() {
   const [priceOpen, setPriceOpen] = useState(true);
   const [brandOpen, setBrandOpen] = useState(true);
 
-  // Filter state
-  const [selectedCategoryId, setSelectedCategoryId] = useState(
-    searchParams.get("categoryId") || "",
+  // Filter state — use slug for SEO-friendly URLs
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState(
+    searchParams.get("categorySlug") || searchParams.get("categoryId") || "",
   );
 
-  // ✅ FIX 2: Multi-select brand — store as string[] instead of single string.
-  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>(() => {
-    const param = searchParams.get("brandId");
+  // ✅ FIX 2: Multi-select brand — store as string[] (slug or id)
+  const [selectedBrandSlugs, setSelectedBrandSlugs] = useState<string[]>(() => {
+    const param = searchParams.get("brandSlug") || searchParams.get("brandId");
     return param ? param.split(",").filter(Boolean) : [];
   });
 
@@ -220,10 +220,9 @@ function ProductsContent() {
 
   const buildQuery = useCallback(() => {
     const params = new URLSearchParams();
-    if (selectedCategoryId) params.set("categoryId", selectedCategoryId);
-    // ✅ FIX 2: Join multiple brand IDs with comma for the API query.
-    if (selectedBrandIds.length > 0)
-      params.set("brandId", selectedBrandIds.join(","));
+    if (selectedCategorySlug) params.set("categorySlug", selectedCategorySlug);
+    if (selectedBrandSlugs.length > 0)
+      params.set("brandSlug", selectedBrandSlugs.join(","));
     if (selectedSort && selectedSort !== "default")
       params.set("sort", selectedSort);
     if (selectedLimit !== 30) params.set("limit", String(selectedLimit));
@@ -235,8 +234,8 @@ function ProductsContent() {
     params.set("status", "ACTIVE");
     return params.toString();
   }, [
-    selectedCategoryId,
-    selectedBrandIds,
+    selectedCategorySlug,
+    selectedBrandSlugs,
     selectedSort,
     selectedLimit,
     search,
@@ -244,6 +243,35 @@ function ProductsContent() {
     currentPage,
     priceRange,
     maxPrice,
+  ]);
+
+  // ✅ FIX: Sync URL so browser bar reflects current filters (SEO-friendly slugs)
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedCategorySlug) params.set("categorySlug", selectedCategorySlug);
+    if (selectedBrandSlugs.length > 0)
+      params.set("brandSlug", selectedBrandSlugs.join(","));
+    if (selectedSort && selectedSort !== "default")
+      params.set("sort", selectedSort);
+    if (selectedLimit !== 30) params.set("limit", String(selectedLimit));
+    if (search) params.set("search", search);
+    if (isOnPromotion) params.set("isOnPromotion", "true");
+    if (currentPage > 1) params.set("page", String(currentPage));
+    if (priceRange[0] > 0) params.set("minPrice", String(priceRange[0]));
+    if (priceRange[1] < maxPrice) params.set("maxPrice", String(priceRange[1]));
+    const qs = params.toString();
+    router.replace(`/products${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [
+    selectedCategorySlug,
+    selectedBrandSlugs,
+    selectedSort,
+    selectedLimit,
+    search,
+    isOnPromotion,
+    currentPage,
+    priceRange,
+    maxPrice,
+    router,
   ]);
 
   // Load categories + brands (these are light lists, not products)
@@ -269,13 +297,14 @@ function ProductsContent() {
 
   // Page title
   useEffect(() => {
-    if (!selectedCategoryId) {
+    if (!selectedCategorySlug) {
       setPageTitle(isOnPromotion ? "Promotions" : "All Products");
       return;
     }
     const find = (cats: CategoryWithChildren[]): string | null => {
       for (const c of cats) {
-        if (c.id === selectedCategoryId) return c.name;
+        if (c.slug === selectedCategorySlug || c.id === selectedCategorySlug)
+          return c.name;
         if (c.children?.length) {
           const f = find(c.children);
           if (f) return f;
@@ -285,7 +314,7 @@ function ProductsContent() {
     };
     const name = find(categories);
     if (name) setPageTitle(name);
-  }, [selectedCategoryId, categories, isOnPromotion]);
+  }, [selectedCategorySlug, categories, isOnPromotion]);
 
   // ✅ FIX 3: Fetch via global store so results are cached.
   useEffect(() => {
@@ -300,35 +329,36 @@ function ProductsContent() {
     });
   };
 
-  const selectCategory = (id: string) => {
-    setSelectedCategoryId(id);
+  const selectCategory = (slug: string) => {
+    setSelectedCategorySlug(slug);
     setCurrentPage(1);
     setSidebarOpen(false);
   };
 
-  // ✅ FIX 2: Toggle brand in/out of the selectedBrandIds array.
-  const toggleBrand = (id: string) => {
-    setSelectedBrandIds((prev) =>
-      prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id],
+  // ✅ FIX 2: Toggle brand slug in/out of the selectedBrandSlugs array.
+  const toggleBrand = (slug: string) => {
+    setSelectedBrandSlugs((prev) =>
+      prev.includes(slug) ? prev.filter((b) => b !== slug) : [...prev, slug],
     );
     setCurrentPage(1);
   };
 
   const clearBrands = () => {
-    setSelectedBrandIds([]);
+    setSelectedBrandSlugs([]);
     setCurrentPage(1);
   };
 
   const renderCategoryItem = (cat: CategoryWithChildren, depth = 0) => {
     const hasChildren = cat.children && cat.children.length > 0;
     const isExpanded = expandedCategories.has(cat.id);
-    const isSelected = selectedCategoryId === cat.id;
+    const isSelected =
+      selectedCategorySlug === cat.slug || selectedCategorySlug === cat.id;
     return (
       <div key={cat.id}>
         <button
           onClick={() => {
             if (hasChildren) toggleCategory(cat.id);
-            selectCategory(cat.id);
+            selectCategory(cat.slug);
           }}
           className={cn(
             "w-full flex items-center justify-between py-1.5 text-sm transition-colors",
@@ -374,7 +404,7 @@ function ProductsContent() {
             onClick={() => selectCategory("")}
             className={cn(
               "w-full text-left py-1.5 text-sm font-medium transition-colors flex items-center gap-2",
-              !selectedCategoryId
+              !selectedCategorySlug
                 ? "text-green-700"
                 : "text-gray-700 hover:text-green-700",
             )}
@@ -385,7 +415,7 @@ function ProductsContent() {
           <button
             onClick={() => {
               setIsOnPromotion(true);
-              setSelectedCategoryId("");
+              setSelectedCategorySlug("");
               setCurrentPage(1);
             }}
             className={cn(
@@ -444,9 +474,9 @@ function ProductsContent() {
               <h3 className="font-bold text-gray-900 uppercase text-xs tracking-widest">
                 Brand
               </h3>
-              {selectedBrandIds.length > 0 && (
+              {selectedBrandSlugs.length > 0 && (
                 <span className="bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                  {selectedBrandIds.length}
+                  {selectedBrandSlugs.length}
                 </span>
               )}
             </div>
@@ -459,7 +489,7 @@ function ProductsContent() {
           </button>
           {brandOpen && (
             <div className="p-3">
-              {selectedBrandIds.length > 0 && (
+              {selectedBrandSlugs.length > 0 && (
                 <button
                   onClick={clearBrands}
                   className="w-full text-left text-xs text-green-700 hover:text-green-900 font-medium mb-2 px-1"
@@ -469,11 +499,11 @@ function ProductsContent() {
               )}
               <div className="max-h-64 overflow-y-auto space-y-0.5">
                 {brands.map((brand) => {
-                  const isSelected = selectedBrandIds.includes(brand.id);
+                  const isSelected = selectedBrandSlugs.includes(brand.slug);
                   return (
                     <button
                       key={brand.id}
-                      onClick={() => toggleBrand(brand.id)}
+                      onClick={() => toggleBrand(brand.slug)}
                       className={cn(
                         "w-full flex items-center gap-2.5 py-1.5 px-1 text-sm transition-colors rounded",
                         isSelected
@@ -510,8 +540,8 @@ function ProductsContent() {
   );
 
   // ✅ FIX 2: Active filters now handles multiple brands.
-  const selectedBrandNames = selectedBrandIds
-    .map((id) => brands.find((b) => b.id === id)?.name)
+  const selectedBrandNames = selectedBrandSlugs
+    .map((slug) => brands.find((b) => b.slug === slug)?.name)
     .filter(Boolean)
     .join(", ");
 
@@ -520,7 +550,7 @@ function ProductsContent() {
       label: "Promotions",
       clear: () => setIsOnPromotion(false),
     },
-    selectedBrandIds.length > 0 && {
+    selectedBrandSlugs.length > 0 && {
       label: `Brand: ${selectedBrandNames}`,
       clear: clearBrands,
     },
@@ -569,9 +599,9 @@ function ProductsContent() {
               >
                 <Filter className="w-4 h-4" />
                 Filters
-                {selectedBrandIds.length > 0 && (
+                {selectedBrandSlugs.length > 0 && (
                   <span className="bg-green-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                    {selectedBrandIds.length}
+                    {selectedBrandSlugs.length}
                   </span>
                 )}
               </button>

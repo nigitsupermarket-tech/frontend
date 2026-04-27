@@ -1,6 +1,4 @@
 "use client";
-// frontend/src/app/(admin)/admin/settings/home/page.tsx
-
 import { useState, useEffect } from "react";
 import { Save, Loader2, Plus, Trash2, Eye, EyeOff } from "lucide-react";
 import { apiGet, apiPut, getApiError } from "@/lib/api";
@@ -37,6 +35,17 @@ interface HeroBanner {
   darkOverlay?: boolean;
   overlayOpacity?: number;
 }
+
+interface CardHeroSlideAdmin {
+  id?: string;
+  heading: string;
+  paragraph?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  image?: string;
+}
+
+type HeroDisplayType = "classic" | "card" | "both";
 
 interface TrustBadge {
   icon: string;
@@ -141,6 +150,11 @@ function DarkOverlayControl({
 export default function AdminHomeSettingsTab() {
   const [heroSlides, setHeroSlides] = useState<HeroSlide[]>([]);
   const [heroBanners, setHeroBanners] = useState<HeroBanner[]>([]);
+  const [cardHeroSlides, setCardHeroSlides] = useState<CardHeroSlideAdmin[]>(
+    [],
+  );
+  const [heroDisplayType, setHeroDisplayType] =
+    useState<HeroDisplayType>("classic");
   const [trustBadges, setTrustBadges] = useState<TrustBadge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -179,6 +193,17 @@ export default function AdminHomeSettingsTab() {
 
       setHeroSlides(slides);
       setHeroBanners(banners);
+      setCardHeroSlides(
+        (settings.cardHeroSlides || []).map((s: any) => ({
+          id: s.id || generateId(),
+          heading: s.heading || "",
+          paragraph: s.paragraph || "",
+          buttonText: s.buttonText || "",
+          buttonUrl: s.buttonUrl || "",
+          image: s.image || "",
+        })),
+      );
+      setHeroDisplayType(settings.heroDisplayType || "classic");
       setTrustBadges(settings.trustBadges || []);
     } catch (err) {
       toast(getApiError(err), "error");
@@ -233,6 +258,49 @@ export default function AdminHomeSettingsTab() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveCardHeroSlides = async () => {
+    setSaving(true);
+    try {
+      await apiPut("/settings/card-hero-slides", {
+        cardHeroSlides,
+        heroDisplayType,
+      });
+      toast("Card hero slides saved", "success");
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addCardSlide = () => {
+    setCardHeroSlides([
+      ...cardHeroSlides,
+      {
+        id: generateId(),
+        heading: "",
+        paragraph: "",
+        buttonText: "",
+        buttonUrl: "",
+        image: "",
+      },
+    ]);
+  };
+
+  const updateCardSlide = (
+    index: number,
+    field: keyof CardHeroSlideAdmin,
+    value: string,
+  ) => {
+    const updated = [...cardHeroSlides];
+    updated[index] = { ...updated[index], [field]: value };
+    setCardHeroSlides(updated);
+  };
+
+  const removeCardSlide = (index: number) => {
+    setCardHeroSlides(cardHeroSlides.filter((_, i) => i !== index));
   };
 
   const addSlide = () => {
@@ -668,6 +736,197 @@ export default function AdminHomeSettingsTab() {
             <Save className="w-4 h-4" />
           )}
           Save Hero Banners
+        </button>
+      </div>
+
+      {/* ── Card Hero (Bell-Italia style) ──────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Card Hero Slides
+            </h2>
+            <p className="text-sm text-gray-500">
+              Bell-Italia style — 3 cards per slide, each with heading, text
+              &amp; image
+            </p>
+          </div>
+          <button
+            onClick={addCardSlide}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-semibold rounded-lg hover:bg-brand-700"
+          >
+            <Plus className="w-4 h-4" /> Add Card
+          </button>
+        </div>
+
+        {/* ── Display type toggle ── */}
+        <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+            Hero Display Mode
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                {
+                  value: "classic",
+                  label: "Classic Only",
+                  desc: "Original slider + banners",
+                },
+                {
+                  value: "card",
+                  label: "Cards Only",
+                  desc: "Bell-Italia style cards",
+                },
+                { value: "both", label: "Both", desc: "Show both hero types" },
+              ] as { value: HeroDisplayType; label: string; desc: string }[]
+            ).map(({ value, label, desc }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setHeroDisplayType(value)}
+                className={`flex flex-col items-start p-3 rounded-lg border-2 transition-colors text-left ${
+                  heroDisplayType === value
+                    ? "border-brand-500 bg-brand-50"
+                    : "border-gray-200 hover:border-gray-300 bg-white"
+                }`}
+              >
+                <span
+                  className={`text-xs font-semibold ${heroDisplayType === value ? "text-brand-700" : "text-gray-700"}`}
+                >
+                  {label}
+                </span>
+                <span className="text-[11px] text-gray-400 mt-0.5 leading-tight">
+                  {desc}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {cardHeroSlides.map((card, index) => (
+            <div
+              key={card.id || index}
+              className="border border-gray-200 rounded-xl p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">
+                  Card {index + 1}
+                  {card.heading ? `: ${card.heading.substring(0, 40)}` : ""}
+                  <span className="ml-2 text-[11px] font-normal text-gray-400">
+                    (Slide {Math.floor(index / 3) + 1}, position{" "}
+                    {(index % 3) + 1}/3)
+                  </span>
+                </span>
+                <button
+                  onClick={() => removeCardSlide(index)}
+                  className="text-red-600 hover:text-red-700 p-1"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Heading *
+                  </label>
+                  <input
+                    value={card.heading}
+                    onChange={(e) =>
+                      updateCardSlide(index, "heading", e.target.value)
+                    }
+                    className={inputCls}
+                    placeholder="7000 Products in our Assortment"
+                  />
+                </div>
+              </div>
+
+              <DragDropMediaUploader
+                key={`card-image-${card.id}`}
+                value={
+                  card.image
+                    ? [{ url: card.image, type: "image" as const }]
+                    : []
+                }
+                onChange={(items) =>
+                  updateCardSlide(index, "image", items[0]?.url || "")
+                }
+                maxFiles={1}
+                folder={`card-hero/card-${index + 1}`}
+                accept="image"
+                label="Card Image"
+                helperText="Upload or paste image URL — shown on the right 1/3 of the card"
+                showPreview={true}
+              />
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Paragraph (desktop only)
+                </label>
+                <textarea
+                  value={card.paragraph || ""}
+                  onChange={(e) =>
+                    updateCardSlide(index, "paragraph", e.target.value)
+                  }
+                  rows={2}
+                  className={inputCls + " resize-none"}
+                  placeholder="NigiTriple carries the best Nigerian FMCG products at unbeatable prices..."
+                />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Button Text (optional)
+                  </label>
+                  <input
+                    value={card.buttonText || ""}
+                    onChange={(e) =>
+                      updateCardSlide(index, "buttonText", e.target.value)
+                    }
+                    className={inputCls}
+                    placeholder="Learn More"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Button URL (optional)
+                  </label>
+                  <input
+                    value={card.buttonUrl || ""}
+                    onChange={(e) =>
+                      updateCardSlide(index, "buttonUrl", e.target.value)
+                    }
+                    className={inputCls}
+                    placeholder="/products"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {cardHeroSlides.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <p className="text-sm">
+                No card slides added yet. Add some cards — every 3 form one
+                slide.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={saveCardHeroSlides}
+          disabled={saving}
+          className="flex items-center gap-2 px-6 py-3 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60"
+        >
+          {saving ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4" />
+          )}
+          Save Card Hero Slides
         </button>
       </div>
 

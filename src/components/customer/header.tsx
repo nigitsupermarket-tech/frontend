@@ -147,7 +147,7 @@ function CategoryBar({ categories }: { categories: Category[] }) {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search)
       : null;
-  const activeCatId = searchParams?.get("categoryId") ?? "";
+  const activeCatId = searchParams?.get("categorySlug") ?? searchParams?.get("categoryId") ?? "";
   if (!categories.length) return null;
 
   return (
@@ -180,7 +180,7 @@ function CategoryBar({ categories }: { categories: Category[] }) {
             style={{ scrollbarWidth: "none" }}
           >
             {categories.map((cat) => {
-              const isActive = activeCatId === cat.id;
+              const isActive = activeCatId === cat.slug || activeCatId === cat.id;
               const hasSvg = !!cat.svgIcon;
               const hasImage = !!cat.image;
               const hasAnyIcon = hasSvg || hasImage;
@@ -188,7 +188,7 @@ function CategoryBar({ categories }: { categories: Category[] }) {
               return (
                 <button
                   key={cat.id}
-                  onClick={() => router.push(`/products?categoryId=${cat.id}`)}
+                  onClick={() => router.push(`/products?categorySlug=${cat.slug}`)}
                   className={cn(
                     "group shrink-0 flex items-center gap-2 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all duration-200 border-b-2",
                     isActive

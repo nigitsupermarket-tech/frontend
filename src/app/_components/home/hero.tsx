@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { apiGet } from "@/lib/api";
+import { CardHero, type CardHeroSlide } from "./card-hero";
 
 interface MediaItem {
   url: string;
@@ -19,8 +20,8 @@ interface HeroSlide {
   videoUrl?: string;
   media?: MediaItem[];
   animation?: "fade" | "slide" | "zoom" | "none";
-  darkOverlay?: boolean; // admin-controlled dark overlay on background
-  overlayOpacity?: number; // 0–1, default 0.45
+  darkOverlay?: boolean;
+  overlayOpacity?: number;
 }
 interface HeroBanner {
   heading?: string;
@@ -37,6 +38,8 @@ interface HeroBanner {
 export function Hero() {
   const [slides, setSlides] = useState<HeroSlide[]>([]);
   const [banners, setBanners] = useState<HeroBanner[]>([]);
+  const [cardSlides, setCardSlides] = useState<CardHeroSlide[]>([]);
+  const [heroDisplayType, setHeroDisplayType] = useState<"classic" | "card" | "both">("classic");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -44,7 +47,6 @@ export function Hero() {
       .then((res) => {
         const s = res.data?.settings ?? res.data ?? {};
 
-        // Normalise: support both new { media:[] } and old { image:"" } shapes
         const normSlide = (slide: any): HeroSlide => ({
           ...slide,
           media: slide.media?.length
@@ -67,14 +69,28 @@ export function Hero() {
 
         setSlides((s.heroSlides || []).map(normSlide));
         setBanners((s.heroBanners || []).map(normBanner));
+        setCardSlides(s.cardHeroSlides || []);
+        setHeroDisplayType(s.heroDisplayType || "classic");
       })
-      .catch(() => {
-        /* fall through to defaults */
-      })
+      .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
 
-  return <HeroInner slides={slides} banners={banners} loaded={loaded} />;
+  if (!loaded) return <HeroSkeleton />;
+
+  const showClassic = heroDisplayType === "classic" || heroDisplayType === "both";
+  const showCard = heroDisplayType === "card" || heroDisplayType === "both";
+
+  return (
+    <>
+      {showClassic && (
+        <HeroInner slides={slides} banners={banners} loaded={loaded} />
+      )}
+      {showCard && cardSlides.length > 0 && (
+        <CardHero slides={cardSlides} />
+      )}
+    </>
+  );
 }
 
 // ── Inner slider ──────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
 import { Providers } from "@/components/shared/providers";
+import { SiteInjector } from "@/components/shared/site-injector";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -52,6 +53,7 @@ export default function RootLayout({
       </head>
       <body className={`${montserrat.variable} font-sans antialiased`}>
         <Providers>
+          <SiteInjector />
           {children}
           <Toaster />
         </Providers>

@@ -391,6 +391,10 @@ export interface SiteSettings {
   metaDescription?: string;
   metaImage?: string;
 
+  // Analytics
+  googleAnalyticsId?: string;
+  facebookPixelId?: string;
+
   // Header
   headerBanner?: string;
   showHeaderBanner?: boolean;
