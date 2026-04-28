@@ -26,6 +26,9 @@ import {
   TrendingUp,
   Activity,
   Inbox,
+  MapPin,
+  Zap,
+  CheckCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -38,10 +41,9 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string;
   children?: { label: string; href: string }[];
-  roles?: string[]; // if undefined = all roles can see it
+  roles?: string[];
 }
 
-// Full nav definition — each item has optional `roles` to restrict visibility
 const ALL_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
 
@@ -69,7 +71,6 @@ const ALL_NAV_ITEMS: NavItem[] = [
     ],
   },
 
-  // SALES can see promotions directly
   {
     label: "Promotions",
     href: "/admin/promotions",
@@ -88,10 +89,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     icon: Users,
     children: [
       { label: "All Customers", href: "/admin/customers" },
-      {
-        label: "User Management",
-        href: "/admin/users" /* admin only shown via roles */,
-      },
+      { label: "User Management", href: "/admin/users" },
     ],
   },
 
@@ -101,8 +99,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
     icon: Star,
     roles: ["ADMIN", "STAFF"],
   },
+
   {
-    // ✅ Contact Inbox + Subscribers — visible to STAFF and ADMIN only
     label: "Inbox",
     icon: Inbox,
     roles: ["ADMIN", "STAFF"],
@@ -128,8 +126,11 @@ const ALL_NAV_ITEMS: NavItem[] = [
     icon: Truck,
     roles: ["ADMIN", "STAFF"],
     children: [
+      { label: "Overview", href: "/admin/shipping" },
+      { label: "Ready to Ship", href: "/admin/shipping/ready" },
+      { label: "All Shipments", href: "/admin/shipping/shipments" },
       { label: "Shipping Zones", href: "/admin/shipping/zones" },
-      { label: "Shipping Methods", href: "/admin/shipping/methods" },
+      { label: "Delivery Methods", href: "/admin/shipping/methods" },
     ],
   },
 
@@ -184,9 +185,13 @@ function NavItemComponent({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+
   const isActive = item.href
     ? pathname === item.href
-    : item.children?.some((c) => pathname.startsWith(c.href));
+    : item.children?.some(
+        (c) => pathname === c.href || pathname.startsWith(c.href + "/"),
+      );
+
   const [expanded, setExpanded] = useState(isActive || false);
   const isPOS = item.label === "Point of Sale";
 
@@ -260,12 +265,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuthStore();
   const role = user?.role || "STAFF";
 
-  // Filter nav items by role
   const visibleItems = ALL_NAV_ITEMS.filter(
     (item) => !item.roles || item.roles.includes(role),
   );
 
-  // For SALES: also filter "User Management" child from Customers
   const processedItems = visibleItems.map((item) => {
     if (item.label === "Customers" && role === "SALES") {
       return {
@@ -279,7 +282,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-        {/* Role badge */}
         {role === "SALES" && (
           <div className="px-3 py-1.5 mb-2 bg-blue-50 text-blue-700 text-xs font-semibold rounded-lg">
             Sales Manager
