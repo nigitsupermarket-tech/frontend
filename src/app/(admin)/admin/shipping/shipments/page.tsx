@@ -2,7 +2,7 @@
 // frontend/src/app/(admin)/admin/shipping/shipments/page.tsx
 // Manage active shipments — create, track, update status
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import {
   Truck,
   Search,
@@ -14,7 +14,6 @@ import {
   Clock,
   ExternalLink,
   Edit2,
-  MoreVertical,
   X,
   ChevronLeft,
   ChevronRight,
@@ -85,16 +84,45 @@ const STATUS_STYLE: Record<
   },
 };
 
-export default function ShipmentsPage() {
-  const toast = useToast();
+// ── Reads searchParams — must live inside <Suspense> ─────────────────────────
+function ShipmentsPageInner() {
   const searchParams = useSearchParams();
+  return (
+    <ShipmentsContent initialStatus={searchParams.get("status") || "ALL"} />
+  );
+}
+
+// ── Default export: wraps the inner component in Suspense ────────────────────
+export default function ShipmentsPage() {
+  return (
+    <Suspense fallback={<ShipmentsSkeleton />}>
+      <ShipmentsPageInner />
+    </Suspense>
+  );
+}
+
+// ── Skeleton shown while Suspense resolves ───────────────────────────────────
+function ShipmentsSkeleton() {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="h-8 w-48 bg-gray-200 rounded-xl animate-pulse" />
+      <div className="h-10 w-96 bg-gray-100 rounded-xl animate-pulse" />
+      <div className="bg-white border border-gray-100 rounded-2xl p-12 text-center">
+        <Truck className="w-8 h-8 mx-auto mb-2 animate-pulse opacity-30" />
+        <p className="text-gray-400">Loading shipments…</p>
+      </div>
+    </div>
+  );
+}
+
+// ── All the real page logic lives here ───────────────────────────────────────
+function ShipmentsContent({ initialStatus }: { initialStatus: string }) {
+  const toast = useToast();
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState(
-    searchParams.get("status") || "ALL",
-  );
+  const [activeTab, setActiveTab] = useState(initialStatus);
   const [page, setPage] = useState(1);
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(
     null,
@@ -342,10 +370,7 @@ export default function ShipmentsPage() {
                               <Clock className="w-3 h-3" />
                               {new Date(s.estimatedDelivery).toLocaleDateString(
                                 "en-NG",
-                                {
-                                  day: "numeric",
-                                  month: "short",
-                                },
+                                { day: "numeric", month: "short" },
                               )}
                             </div>
                           ) : (
@@ -354,7 +379,6 @@ export default function ShipmentsPage() {
                         </td>
                         <td className="py-4 px-4">
                           <div className="flex items-center justify-end gap-1">
-                            {/* Update Tracking */}
                             <button
                               onClick={() => {
                                 setSelectedShipment(s);
@@ -365,8 +389,6 @@ export default function ShipmentsPage() {
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-
-                            {/* Add Event */}
                             <button
                               onClick={() => {
                                 setSelectedShipment(s);
@@ -377,8 +399,6 @@ export default function ShipmentsPage() {
                             >
                               <ClipboardList className="w-3.5 h-3.5" />
                             </button>
-
-                            {/* Quick status actions */}
                             {s.status === "SHIPPED" && (
                               <button
                                 onClick={() => handleMarkOutForDelivery(s)}
@@ -446,7 +466,7 @@ export default function ShipmentsPage() {
         )}
       </div>
 
-      {/* Update Tracking Modal */}
+      {/* Modals */}
       {showTrackingModal && selectedShipment && (
         <UpdateTrackingModal
           shipment={selectedShipment}
@@ -461,8 +481,6 @@ export default function ShipmentsPage() {
           }}
         />
       )}
-
-      {/* Add Tracking Event Modal */}
       {showEventModal && selectedShipment && (
         <AddTrackingEventModal
           shipment={selectedShipment}
@@ -632,10 +650,7 @@ const QUICK_EVENTS = [
     status: "Shipment Dispatched",
     message: "Your order has been dispatched from our facility",
   },
-  {
-    status: "In Transit",
-    message: "Your order is on its way to you",
-  },
+  { status: "In Transit", message: "Your order is on its way to you" },
   {
     status: "Arrived at Hub",
     message: "Your order has arrived at the delivery hub",
@@ -664,11 +679,7 @@ function AddTrackingEventModal({
   onSuccess: () => void;
 }) {
   const toast = useToast();
-  const [form, setForm] = useState({
-    status: "",
-    message: "",
-    location: "",
-  });
+  const [form, setForm] = useState({ status: "", message: "", location: "" });
   const [loading, setLoading] = useState(false);
 
   const handleQuickFill = (event: (typeof QUICK_EVENTS)[0]) => {
@@ -712,8 +723,6 @@ function AddTrackingEventModal({
             Order: <strong>{shipment.orderNumber}</strong> ·{" "}
             {shipment.customerName}
           </p>
-
-          {/* Quick events */}
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
               Quick Events
@@ -734,7 +743,6 @@ function AddTrackingEventModal({
               ))}
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Status *
