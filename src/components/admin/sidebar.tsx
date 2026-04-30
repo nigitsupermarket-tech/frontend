@@ -1,7 +1,9 @@
 "use client";
 // frontend/src/components/admin/sidebar.tsx
-// Role-aware sidebar: ADMIN sees everything, STAFF sees POS+products+orders,
-// SALES sees POS, orders, customers, marketing, analytics (sales-focused)
+// Role-aware sidebar:
+//   ADMIN  — everything
+//   STAFF  — POS, products, orders, inventory (no customers user management, no POS sessions, no settings)
+//   SALES  — POS, orders, customers (no user mgmt), marketing, analytics
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,20 +28,21 @@ import {
   TrendingUp,
   Activity,
   Inbox,
-  MapPin,
   Zap,
   CheckCircle,
+  ClipboardCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useSidebar } from "@/components/admin/sidebar-context";
 import { useAuthStore } from "@/store/authStore";
+import { apiGet } from "@/lib/api";
 
 interface NavItem {
   label: string;
   href?: string;
   icon: React.ElementType;
-  badge?: string;
+  badge?: string | number;
   children?: { label: string; href: string }[];
   roles?: string[];
 }
@@ -53,6 +56,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "🖥️ Open POS", href: "/admin/pos" },
       { label: "POS Orders", href: "/admin/pos/orders" },
+      // POS Sessions: ADMIN only — filtered in processedItems below
       { label: "POS Sessions", href: "/admin/pos/sessions" },
     ],
   },
@@ -85,12 +89,21 @@ const ALL_NAV_ITEMS: NavItem[] = [
   },
 
   {
+    // Customers: STAFF sees only All Customers; SALES same; ADMIN sees both
     label: "Customers",
     icon: Users,
     children: [
       { label: "All Customers", href: "/admin/customers" },
       { label: "User Management", href: "/admin/users" },
     ],
+  },
+
+  {
+    // Stock Approvals — ADMIN only
+    label: "Stock Approvals",
+    href: "/admin/stock-approvals",
+    icon: ClipboardCheck,
+    roles: ["ADMIN"],
   },
 
   {
@@ -249,14 +262,21 @@ function NavItemComponent({
       href={item.href!}
       onClick={onNavigate}
       className={cn(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+        "flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
         isActive
           ? "bg-green-50 text-green-700"
           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900",
       )}
     >
-      <item.icon className="w-4 h-4 shrink-0" />
-      {item.label}
+      <div className="flex items-center gap-3">
+        <item.icon className="w-4 h-4 shrink-0" />
+        {item.label}
+      </div>
+      {item.badge ? (
+        <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] text-center">
+          {item.badge}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -264,17 +284,44 @@ function NavItemComponent({
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuthStore();
   const role = user?.role || "STAFF";
+  const [pendingCount, setPendingCount] = useState(0);
 
-  const visibleItems = ALL_NAV_ITEMS.filter(
+  // Load pending stock approval count for admins
+  useEffect(() => {
+    if (role !== "ADMIN") return;
+    apiGet<any>("/stock-approvals/pending-count")
+      .then((r) => setPendingCount(r.data?.count || 0))
+      .catch(() => {});
+  }, [role]);
+
+  // Filter by role
+  let visibleItems = ALL_NAV_ITEMS.filter(
     (item) => !item.roles || item.roles.includes(role),
   );
 
-  const processedItems = visibleItems.map((item) => {
-    if (item.label === "Customers" && role === "SALES") {
+  // Apply role-specific child filtering
+  visibleItems = visibleItems.map((item) => {
+    // Customers: STAFF and SALES cannot see User Management
+    if (item.label === "Customers" && (role === "STAFF" || role === "SALES")) {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "User Management"),
       };
+    }
+    // POS Sessions: only ADMIN
+    if (item.label === "Point of Sale" && role !== "ADMIN") {
+      return {
+        ...item,
+        children: item.children?.filter((c) => c.label !== "POS Sessions"),
+      };
+    }
+    return item;
+  });
+
+  // Inject pending badge on Stock Approvals
+  visibleItems = visibleItems.map((item) => {
+    if (item.label === "Stock Approvals" && pendingCount > 0) {
+      return { ...item, badge: pendingCount > 99 ? "99+" : pendingCount };
     }
     return item;
   });
@@ -292,7 +339,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             Staff
           </div>
         )}
-        {processedItems.map((item) => (
+        {visibleItems.map((item) => (
           <NavItemComponent
             key={item.label}
             item={item}

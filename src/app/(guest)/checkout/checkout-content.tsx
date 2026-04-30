@@ -1,6 +1,6 @@
 "use client";
 // frontend/src/app/(guest)/checkout/checkout-content.tsx
-// Shipping calculated at checkout using state + LGA for precise zone matching
+// Changes: COD removed, cart quantity adjuster on every step, bank transfer notify on submit
 
 import { useState, useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
@@ -14,6 +14,8 @@ import {
   CreditCard,
   FileText,
   Plus,
+  Minus,
+  Trash2,
   MapPin,
   Store,
   Tag,
@@ -31,12 +33,12 @@ import { nigeriaStatesLgas } from "@/data/nigeria-states-lgas";
 import Image from "next/image";
 import Link from "next/link";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Schema — COD removed ─────────────────────────────────────────────────────
 const checkoutSchema = z.object({
   customerName: z.string().min(1, "Name is required"),
   customerEmail: z.string().email("Valid email is required"),
   customerPhone: z.string().min(10, "Valid phone is required"),
-  paymentMethod: z.enum(["PAYSTACK", "BANK_TRANSFER", "CASH_ON_DELIVERY"]),
+  paymentMethod: z.enum(["PAYSTACK", "BANK_TRANSFER"]),
   notes: z.string().optional(),
 });
 type CheckoutForm = z.infer<typeof checkoutSchema>;
@@ -92,6 +94,90 @@ function calculateTotalWeight(items: any[]): number {
   );
 }
 
+// ─── Cart adjuster — shown in order summary sidebar on every step ─────────────
+function CartSummaryAdjuster() {
+  const store = useCartStore();
+  const { isAuthenticated } = useAuthStore();
+  const toast = useToast();
+  const items = store.items;
+  if (items.length === 0) return null;
+
+  const handleUpdate = async (item: any, qty: number) => {
+    if (qty < 1) return;
+    try {
+      await store.updateItem(isAuthenticated ? item.id : item.productId, qty);
+    } catch {
+      toast("Failed to update quantity", "error");
+    }
+  };
+
+  const handleRemove = async (item: any) => {
+    try {
+      await store.removeItem(isAuthenticated ? item.id : item.productId);
+      toast("Item removed", "default");
+    } catch {
+      toast("Failed to remove item", "error");
+    }
+  };
+
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded p-3 space-y-3">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        Your Items
+      </p>
+      {items.map((item: any) => (
+        <div key={item.id} className="flex items-center gap-2">
+          <div className="w-9 h-9 bg-white rounded border overflow-hidden shrink-0">
+            {item.product?.images?.[0] && (
+              <Image
+                src={item.product.images[0]}
+                alt={item.product?.name || ""}
+                width={36}
+                height={36}
+                className="w-full h-full object-contain"
+              />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-gray-900 line-clamp-1">
+              {item.product?.name}
+            </p>
+            <p className="text-xs text-gray-500">{formatPrice(item.price)}</p>
+          </div>
+          <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
+            <button
+              onClick={() => handleUpdate(item, item.quantity - 1)}
+              disabled={item.quantity <= 1}
+              className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+            <span className="w-6 text-center text-xs font-semibold">
+              {item.quantity}
+            </span>
+            <button
+              onClick={() => handleUpdate(item, item.quantity + 1)}
+              disabled={item.quantity >= (item.product?.stockQuantity || 999)}
+              className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+          <p className="text-xs font-bold w-14 text-right shrink-0">
+            {formatPrice(item.price * item.quantity)}
+          </p>
+          <button
+            onClick={() => handleRemove(item)}
+            className="p-1 text-gray-300 hover:text-red-500 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── LGA Selector ─────────────────────────────────────────────────────────────
 function LGASelector({
   state,
@@ -104,13 +190,11 @@ function LGASelector({
 }) {
   const stateData = nigeriaStatesLgas.find((s: any) => s.state === state);
   const lgas: string[] = stateData?.lga || [];
-
   if (lgas.length === 0) return null;
-
   return (
     <div>
       <label className="block text-xs font-semibold text-gray-700 mb-1">
-        Local Government Area (LGA) *
+        Local Government Area (LGA) *{" "}
         <span className="ml-1 font-normal text-gray-500">
           — used for precise shipping cost
         </span>
@@ -132,7 +216,13 @@ function LGASelector({
 }
 
 // ─── Address Form ─────────────────────────────────────────────────────────────
-function AddressForm({ onSave }: { onSave: (addr: Address) => void }) {
+function AddressForm({
+  onSave,
+  isAuthenticated,
+}: {
+  onSave: (addr: Address) => void;
+  isAuthenticated: boolean;
+}) {
   const [form, setForm] = useState({
     label: "",
     firstName: "",
@@ -146,26 +236,43 @@ function AddressForm({ onSave }: { onSave: (addr: Address) => void }) {
     country: "Nigeria",
     postalCode: "",
   });
+  const [saveToAccount, setSaveToAccount] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   const set = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
+  const inp =
+    "w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded";
 
-  // When state changes, reset LGA
-  const handleStateChange = (state: string) => {
-    set("state", state);
-    set("lga", "");
-  };
-
-  const handleSave = () => {
+  const handleUse = async () => {
     if (!form.firstName || !form.address || !form.city || !form.state) return;
+
+    let savedId = Math.random().toString(36).slice(2);
+
+    // Save to DB if user is logged in and opted in
+    if (isAuthenticated && saveToAccount) {
+      setSaving(true);
+      try {
+        const res = await apiPost<any>("/addresses", {
+          ...form,
+          isDefault: false,
+        });
+        // Use the real DB id so the address can be updated/deleted later
+        savedId = res.data.address?.id || savedId;
+        toast("Address saved to your account", "success");
+      } catch {
+        toast("Could not save address — continuing anyway", "error");
+      } finally {
+        setSaving(false);
+      }
+    }
+
     onSave({
       ...form,
-      id: Math.random().toString(36).slice(2),
+      id: savedId,
       isDefault: false,
     });
   };
-
-  const inp =
-    "w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded";
 
   return (
     <div className="space-y-3 border border-gray-200 p-4 rounded bg-gray-50">
@@ -207,15 +314,16 @@ function AddressForm({ onSave }: { onSave: (addr: Address) => void }) {
         onChange={(e) => set("city", e.target.value)}
         className={inp}
       />
-
-      {/* State dropdown from LGA data */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-1">
           State *
         </label>
         <select
           value={form.state}
-          onChange={(e) => handleStateChange(e.target.value)}
+          onChange={(e) => {
+            set("state", e.target.value);
+            set("lga", "");
+          }}
           className={inp + " bg-white"}
         >
           {nigeriaStatesLgas.map((s: any) => (
@@ -225,14 +333,11 @@ function AddressForm({ onSave }: { onSave: (addr: Address) => void }) {
           ))}
         </select>
       </div>
-
-      {/* LGA dropdown — dynamically loaded from selected state */}
       <LGASelector
         state={form.state}
         lga={form.lga}
         onChange={(v) => set("lga", v)}
       />
-
       <input
         placeholder="Address label (e.g. Home, Office)"
         value={form.label}
@@ -240,12 +345,32 @@ function AddressForm({ onSave }: { onSave: (addr: Address) => void }) {
         className={inp}
       />
 
+      {/* Save to account option — only shown to logged-in users */}
+      {isAuthenticated && (
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={saveToAccount}
+            onChange={(e) => setSaveToAccount(e.target.checked)}
+            className="w-4 h-4 accent-green-600"
+          />
+          Save this address to my account for future orders
+        </label>
+      )}
+
       <button
         type="button"
-        onClick={handleSave}
-        className="w-full bg-green-600 text-white text-sm font-semibold py-2.5 rounded hover:bg-green-700"
+        onClick={handleUse}
+        disabled={saving}
+        className="w-full bg-green-600 text-white text-sm font-semibold py-2.5 rounded hover:bg-green-700 disabled:opacity-60 flex items-center justify-center gap-2"
       >
-        Use This Address
+        {saving ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" /> Saving…
+          </>
+        ) : (
+          "Use This Address"
+        )}
       </button>
     </div>
   );
@@ -269,16 +394,14 @@ export default function CheckoutPageContent() {
   const [success, setSuccess] = useState(false);
   const [orderId, setOrderId] = useState("");
 
-  const { items, clearCart } = useCartStore();
+  const { items, clearCart, isLoading: cartLoading } = useCartStore();
   const { user } = useAuthStore();
   const toast = useToast();
-  const router = useRouter();
 
   const {
     register,
     handleSubmit,
     formState: { errors },
-    watch,
   } = useForm<CheckoutForm>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
@@ -292,16 +415,13 @@ export default function CheckoutPageContent() {
   const selectedAddress = addresses.find((a) => a.id === selectedAddressId);
   const selectedMethod = shippingMethods.find((m) => m.id === selectedMethodId);
   const totalWeight = useMemo(() => calculateTotalWeight(items), [items]);
-
   const subtotal = useMemo(
     () => items.reduce((s, item) => s + item.price * item.quantity, 0),
     [items],
   );
 
-  // Shipping cost from the pre-calculated method (server already computed it)
   const shippingCost = useMemo(() => {
     if (!selectedMethod) return 0;
-    // FREE_SHIPPING coupon
     if (appliedCoupon?.type === "FREE_SHIPPING") return 0;
     return selectedMethod.cost;
   }, [selectedMethod, appliedCoupon]);
@@ -322,7 +442,6 @@ export default function CheckoutPageContent() {
 
   const total = subtotal + shippingCost - discountAmount;
 
-  // Load saved addresses
   useEffect(() => {
     if (user) {
       apiGet<any>("/addresses")
@@ -338,7 +457,6 @@ export default function CheckoutPageContent() {
     }
   }, [user]);
 
-  // ── Load shipping methods using state + LGA ──
   const loadShippingMethods = async (state: string, lga?: string) => {
     if (!state) return;
     setShippingLoading(true);
@@ -372,9 +490,7 @@ export default function CheckoutPageContent() {
       toast("Please select a delivery address", "error");
       return;
     }
-    if (addr) {
-      loadShippingMethods(addr.state, addr.lga);
-    }
+    if (addr) loadShippingMethods(addr.state, addr.lga);
     setStep(1);
   };
 
@@ -403,7 +519,6 @@ export default function CheckoutPageContent() {
       toast("Please select a shipping method", "error");
       return;
     }
-
     setSubmitting(true);
     try {
       const addr = selectedAddress || {
@@ -416,7 +531,6 @@ export default function CheckoutPageContent() {
         lga: "",
         country: "Nigeria",
       };
-
       const res = await apiPost<any>("/orders", {
         ...data,
         shippingAddress: addr,
@@ -433,21 +547,18 @@ export default function CheckoutPageContent() {
         discountAmount,
         total,
       });
-
       setOrderId(res.data.order.id);
-
       if (data.paymentMethod === "PAYSTACK") {
-        // FIX: use /payment (singular) to match the backend route prefix.
-        // Only send orderId — the server reads the amount from the DB,
-        // which is safer than trusting a client-supplied figure.
         const payRes = await apiPost<any>("/payment/initialize", {
           orderId: res.data.order.id,
         });
         clearCart();
-        // Redirect to Paystack hosted payment page.
-        // Paystack will redirect back to /checkout/verify?reference=xxx
         window.location.href = payRes.data.authorizationUrl;
       } else {
+        // BANK_TRANSFER: send instructions email then show success
+        await apiPost("/payment/bank-transfer/notify", {
+          orderId: res.data.order.id,
+        }).catch(() => {});
         clearCart();
         setSuccess(true);
       }
@@ -458,8 +569,7 @@ export default function CheckoutPageContent() {
     }
   };
 
-  // ── Empty / Success screens ────────────────────────────────────────────────
-  if (items.length === 0 && !success) {
+  if (items.length === 0 && !success && !cartLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -485,7 +595,8 @@ export default function CheckoutPageContent() {
             Order Placed!
           </h2>
           <p className="text-gray-600 mb-6">
-            Thank you for your order. We'll contact you shortly.
+            Thank you for your order. Check your email for bank transfer payment
+            instructions.
           </p>
           <div className="flex gap-3 justify-center">
             <Link
@@ -542,7 +653,6 @@ export default function CheckoutPageContent() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* ── Left: Steps ── */}
           <div className="lg:col-span-2 space-y-4">
             {/* STEP 0: Address */}
             {step === 0 && (
@@ -550,7 +660,6 @@ export default function CheckoutPageContent() {
                 <h2 className="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-green-600" /> Delivery Address
                 </h2>
-
                 {user && addresses.length > 0 && !showAddressForm && (
                   <div className="space-y-3 mb-4">
                     {addresses.map((addr) => (
@@ -586,9 +695,9 @@ export default function CheckoutPageContent() {
                     ))}
                   </div>
                 )}
-
                 {(showAddressForm || !user) && (
                   <AddressForm
+                    isAuthenticated={!!user}
                     onSave={(addr) => {
                       setAddresses((p) => [...p, addr]);
                       setSelectedAddressId(addr.id);
@@ -596,7 +705,6 @@ export default function CheckoutPageContent() {
                     }}
                   />
                 )}
-
                 {user && !showAddressForm && (
                   <button
                     onClick={() => setShowAddressForm(true)}
@@ -605,7 +713,6 @@ export default function CheckoutPageContent() {
                     <Plus className="w-4 h-4" /> Add new address
                   </button>
                 )}
-
                 <button
                   onClick={handleAddressNext}
                   className="mt-5 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded flex items-center justify-center gap-2"
@@ -621,7 +728,6 @@ export default function CheckoutPageContent() {
                 <h2 className="font-bold text-gray-900 text-lg mb-1 flex items-center gap-2">
                   <Truck className="w-5 h-5 text-green-600" /> Shipping Method
                 </h2>
-
                 {selectedAddress && (
                   <div className="mb-3 flex items-start gap-2 text-xs text-gray-500">
                     <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-green-500" />
@@ -639,12 +745,10 @@ export default function CheckoutPageContent() {
                     </span>
                   </div>
                 )}
-
                 <div className="flex items-center gap-2 text-xs text-gray-500 mb-4">
-                  <Scale className="w-3.5 h-3.5" />
-                  Cart weight: <strong>{totalWeight.toFixed(2)}kg</strong>
+                  <Scale className="w-3.5 h-3.5" /> Cart weight:{" "}
+                  <strong>{totalWeight.toFixed(2)}kg</strong>
                 </div>
-
                 {shippingLoading ? (
                   <div className="flex justify-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-green-600" />
@@ -654,9 +758,6 @@ export default function CheckoutPageContent() {
                     <Truck className="w-10 h-10 text-gray-200 mx-auto mb-2" />
                     <p className="text-gray-500 text-sm">
                       No shipping options for your area.
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Please contact us to arrange delivery.
                     </p>
                   </div>
                 ) : (
@@ -703,30 +804,12 @@ export default function CheckoutPageContent() {
                                   {method.estimatedMaxDays} business days
                                 </p>
                               )}
-                            {method.type === "STORE_PICKUP" &&
-                              method.storeAddress && (
-                                <div className="mt-2 text-xs text-gray-600 bg-amber-50 border border-amber-100 rounded p-2">
-                                  <p className="font-semibold">
-                                    {method.storeAddress.name}
-                                  </p>
-                                  <p>
-                                    {method.storeAddress.address},{" "}
-                                    {method.storeAddress.city}
-                                  </p>
-                                  <p>{method.storeAddress.hours}</p>
-                                  <p className="text-green-700 font-medium">
-                                    📞 {method.storeAddress.phone}
-                                  </p>
-                                </div>
-                              )}
                           </div>
                         </label>
                       );
                     })}
                   </div>
                 )}
-
-                {/* Coupon */}
                 <div className="mt-5 p-4 border border-dashed border-gray-300 rounded bg-gray-50">
                   <p className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                     <Tag className="w-4 h-4 text-green-600" /> Have a coupon?
@@ -778,7 +861,6 @@ export default function CheckoutPageContent() {
                     </>
                   )}
                 </div>
-
                 <div className="flex gap-3 mt-5">
                   <button
                     onClick={() => setStep(0)}
@@ -853,7 +935,6 @@ export default function CheckoutPageContent() {
                       )}
                     </div>
                   </div>
-
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-2">
                       Payment Method *
@@ -862,24 +943,14 @@ export default function CheckoutPageContent() {
                       {[
                         {
                           value: "PAYSTACK",
-                          label: "Pay Online (Card / Bank Transfer)",
+                          label:
+                            "Pay Online (Card / Bank Transfer via Paystack)",
                           icon: "💳",
                         },
                         {
                           value: "BANK_TRANSFER",
                           label: "Manual Bank Transfer",
                           icon: "🏦",
-                        },
-                        {
-                          value: "CASH_ON_DELIVERY",
-                          label:
-                            selectedMethod?.type === "STORE_PICKUP"
-                              ? "Pay at Pickup (Cash)"
-                              : "Cash on Delivery",
-                          icon:
-                            selectedMethod?.type === "STORE_PICKUP"
-                              ? "💵"
-                              : "📦",
                         },
                       ].map(({ value, label, icon }) => (
                         <label
@@ -898,7 +969,6 @@ export default function CheckoutPageContent() {
                       ))}
                     </div>
                   </div>
-
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
                       Order Notes (optional)
@@ -910,7 +980,6 @@ export default function CheckoutPageContent() {
                       placeholder="Any special instructions?"
                     />
                   </div>
-
                   <div className="flex gap-3">
                     <button
                       type="button"
@@ -938,7 +1007,6 @@ export default function CheckoutPageContent() {
                   <FileText className="w-5 h-5 text-green-600" /> Review Your
                   Order
                 </h2>
-
                 <div className="space-y-3 mb-5">
                   {items.map((item: any) => (
                     <div
@@ -970,7 +1038,6 @@ export default function CheckoutPageContent() {
                     </div>
                   ))}
                 </div>
-
                 {selectedAddress && (
                   <div className="mb-3 p-3 bg-gray-50 rounded text-sm">
                     <p className="font-semibold text-gray-700 mb-1 flex items-center gap-1">
@@ -1004,7 +1071,6 @@ export default function CheckoutPageContent() {
                     </p>
                   </div>
                 )}
-
                 <form onSubmit={handleSubmit(onSubmit)}>
                   <div className="flex gap-3">
                     <button
@@ -1031,13 +1097,14 @@ export default function CheckoutPageContent() {
             )}
           </div>
 
-          {/* ── Right: Order Summary ── */}
+          {/* ── Right: Order Summary with live cart adjuster ── */}
           <div className="lg:col-span-1">
-            <div className="bg-white border border-gray-200 p-5 rounded sticky top-4">
-              <h3 className="font-bold text-gray-900 text-sm uppercase tracking-wide mb-4">
+            <div className="bg-white border border-gray-200 p-5 rounded sticky top-4 space-y-4">
+              <h3 className="font-bold text-gray-900 text-sm uppercase tracking-wide">
                 Order Summary
               </h3>
-              <div className="space-y-2 text-sm mb-4">
+              <CartSummaryAdjuster />
+              <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal ({items.length} items)</span>
                   <span>{formatPrice(subtotal)}</span>
@@ -1076,12 +1143,12 @@ export default function CheckoutPageContent() {
                   <span>{formatPrice(total)}</span>
                 </div>
               </div>
-              <div className="mt-3 text-xs text-gray-400 flex items-center gap-1">
+              <div className="text-xs text-gray-400 flex items-center gap-1">
                 <Scale className="w-3 h-3" /> Cart weight:{" "}
                 {totalWeight.toFixed(2)}kg
               </div>
               {selectedAddress?.lga && (
-                <div className="mt-2 text-xs text-gray-400 flex items-center gap-1">
+                <div className="text-xs text-gray-400 flex items-center gap-1">
                   <MapPin className="w-3 h-3" /> {selectedAddress.lga},{" "}
                   {selectedAddress.state}
                 </div>

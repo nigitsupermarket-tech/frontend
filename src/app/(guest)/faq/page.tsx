@@ -15,7 +15,7 @@ const FAQ_CATEGORIES: { label: string; items: FAQItem[] }[] = [
     items: [
       {
         q: "How do I place an order?",
-        a: "Browse our catalogue, add products to your cart, and proceed to checkout. You can pay by card via Paystack, bank transfer, or cash on delivery. You'll receive an order confirmation by email once your order is placed.",
+        a: "Browse our catalogue, add products to your cart, and proceed to checkout. You can pay by card or bank transfer via Paystack, or by manual bank transfer. You'll receive an order confirmation by email once your order is placed.",
       },
       {
         q: "What are your delivery areas?",
@@ -65,7 +65,11 @@ const FAQ_CATEGORIES: { label: string; items: FAQItem[] }[] = [
     items: [
       {
         q: "What payment methods do you accept?",
-        a: "We accept payment by debit/credit card via Paystack, bank transfer, and cash on delivery (available in selected areas within Port Harcourt). All card payments are processed securely with 256-bit encryption.",
+        a: "We accept payment by debit/credit card and instant bank transfer via Paystack, or manual bank transfer directly to our account. All card payments are processed securely with 256-bit encryption. We do not offer cash on delivery.",
+      },
+      {
+        q: "How does manual bank transfer work?",
+        a: "Select 'Manual Bank Transfer' at checkout. After placing your order, you'll receive our bank account details by email. Transfer the exact order amount using your order number as the reference, then upload your payment receipt on your order page. Our team will confirm your payment within 2–4 business hours.",
       },
       {
         q: "Are your prices inclusive of delivery?",
@@ -90,7 +94,7 @@ const FAQ_CATEGORIES: { label: string; items: FAQItem[] }[] = [
       },
       {
         q: "How are refunds processed?",
-        a: "Approved refunds are processed within 3–5 working days back to your original payment method. For cash-on-delivery orders, refunds are made via bank transfer.",
+        a: "Approved refunds are processed within 3–5 working days back to your original payment method. Refunds for bank transfer orders are made via bank transfer to your account.",
       },
       {
         q: "Can I cancel my order?",
@@ -150,7 +154,6 @@ function AccordionItem({ q, a }: FAQItem) {
 
 export default function FAQPage() {
   const [activeTab, setActiveTab] = useState(0);
-
   return (
     <div className="min-h-screen">
       <section className="bg-green-800 text-white py-16">
@@ -167,10 +170,8 @@ export default function FAQPage() {
           </p>
         </div>
       </section>
-
       <section className="py-12 bg-gray-50">
         <div className="container max-w-4xl">
-          {/* Category tabs */}
           <div
             className="flex overflow-x-auto gap-2 mb-8 pb-1"
             style={{ scrollbarWidth: "none" }}
@@ -190,15 +191,11 @@ export default function FAQPage() {
               </button>
             ))}
           </div>
-
-          {/* FAQ list */}
           <div className="bg-white rounded-2xl border border-gray-100 px-6 divide-y divide-gray-100">
             {FAQ_CATEGORIES[activeTab].items.map((item, i) => (
               <AccordionItem key={i} {...item} />
             ))}
           </div>
-
-          {/* Still have questions */}
           <div className="mt-10 bg-green-50 border border-green-100 rounded-2xl p-8 text-center">
             <h3 className="text-xl font-bold text-gray-900 mb-2">
               Still have a question?
@@ -215,7 +212,7 @@ export default function FAQPage() {
                 Contact Us
               </Link>
               <Link
-                href="https://wa.me/"
+                href="https://wa.me/2349169776138?text=Hello,%20I'd%20like%20to%20inquire%20about..."
                 className="px-6 py-2.5 bg-[#25D366] text-white font-semibold rounded-xl hover:opacity-90 transition-opacity text-sm"
               >
                 WhatsApp Us

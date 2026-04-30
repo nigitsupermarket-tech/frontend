@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, Package } from "lucide-react";
-import { apiGet, apiPut, getApiError } from "@/lib/api";
+import { Package, Clock } from "lucide-react";
+import { apiGet, apiPost, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
+import { useAuthStore } from "@/store/authStore";
 import {
   TableRowSkeleton,
   EmptyState,
@@ -31,53 +32,66 @@ export default function AdminInventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "low" | "out">("all");
-  const [editing, setEditing] = useState<{ id: string; qty: string } | null>(
-    null,
-  );
+  const [editing, setEditing] = useState<{
+    id: string;
+    qty: string;
+    reason: string;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
   const toast = useToast();
 
-  const fetch = async () => {
+  const fetchItems = async () => {
     setIsLoading(true);
     try {
-      const params: any = {};
-      if (filter === "low") params.stockStatus = "LOW_STOCK";
-      if (filter === "out") params.stockStatus = "OUT_OF_STOCK";
-      const res = await apiGet<any>("/analytics/inventory", params);
-      setItems(
-        [...(res.data.lowStock || []), ...(res.data.outOfStock || [])].filter(
-          (v, i, a) => a.findIndex((x) => x.id === v.id) === i,
-        ),
+      const res = await apiGet<any>("/analytics/inventory");
+      const low: InventoryItem[] = (res.data.lowStock || []).map((p: any) => ({
+        ...p,
+        stockStatus: "LOW_STOCK",
+      }));
+      const out: InventoryItem[] = (res.data.outOfStock || []).map(
+        (p: any) => ({
+          ...p,
+          stockStatus: "OUT_OF_STOCK",
+        }),
       );
+      const all = [...out, ...low].filter(
+        (v, i, a) => a.findIndex((x) => x.id === v.id) === i,
+      );
+      if (filter === "all") setItems(all);
+      else if (filter === "low") setItems(low);
+      else setItems(out);
     } catch {
-      const res = await apiGet<any>("/products", {
-        limit: 100,
-        ...(filter === "out"
-          ? { stockStatus: "OUT_OF_STOCK" }
-          : filter === "low"
-            ? { stockStatus: "LOW_STOCK" }
-            : {}),
-      }).catch(() => ({ data: { products: [] } }));
-      setItems((res as any).data.products);
+      setItems([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetch();
+    fetchItems();
   }, [filter]);
 
-  const updateStock = async () => {
+  const handleSave = async () => {
     if (!editing) return;
     setSaving(true);
     try {
-      await apiPut(`/products/${editing.id}`, {
-        stockQuantity: Number(editing.qty),
+      const res = await apiPost<any>("/stock-approvals", {
+        productId: editing.id,
+        requestedQty: Number(editing.qty),
+        reason: editing.reason || undefined,
+        source: "INVENTORY",
       });
-      toast("Stock updated", "success");
+
+      if (res.data?.autoApproved) {
+        toast("Stock updated", "success");
+      } else {
+        toast("Stock change submitted for admin approval", "success");
+      }
       setEditing(null);
-      fetch();
+      fetchItems();
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -88,18 +102,28 @@ export default function AdminInventoryPage() {
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">
-          Inventory Management
-        </h1>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">
+            Inventory Management
+          </h1>
+          {!isAdmin && (
+            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              Stock changes require admin approval before taking effect
+            </p>
+          )}
+        </div>
         <div className="flex gap-2">
-          {[
-            ["all", "All"],
-            ["low", "Low Stock"],
-            ["out", "Out of Stock"],
-          ].map(([v, l]) => (
+          {(
+            [
+              ["all", "All"],
+              ["low", "Low Stock"],
+              ["out", "Out of Stock"],
+            ] as const
+          ).map(([v, l]) => (
             <button
               key={v}
-              onClick={() => setFilter(v as any)}
+              onClick={() => setFilter(v)}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${filter === v ? "bg-brand-600 text-white" : "border border-gray-200 text-gray-600 hover:border-brand-300"}`}
             >
               {l}
@@ -209,20 +233,43 @@ export default function AdminInventoryPage() {
                     </td>
                     <td className="px-4 py-3">
                       {editing?.id === item.id ? (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={updateStock}
-                            disabled={saving}
-                            className="px-3 py-1 bg-brand-600 text-white text-xs rounded-lg disabled:opacity-60"
-                          >
-                            {saving ? "…" : "Save"}
-                          </button>
-                          <button
-                            onClick={() => setEditing(null)}
-                            className="px-3 py-1 border border-gray-200 text-xs rounded-lg"
-                          >
-                            Cancel
-                          </button>
+                        <div className="space-y-1.5">
+                          <input
+                            placeholder="Reason (optional)"
+                            value={editing.reason}
+                            onChange={(e) =>
+                              setEditing({ ...editing, reason: e.target.value })
+                            }
+                            className="w-40 px-2 py-1 rounded-lg border border-gray-200 text-xs focus:outline-none"
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              onClick={handleSave}
+                              disabled={saving}
+                              className="px-3 py-1 bg-brand-600 text-white text-xs rounded-lg disabled:opacity-60 flex items-center gap-1"
+                            >
+                              {saving ? (
+                                "…"
+                              ) : isAdmin ? (
+                                "Save"
+                              ) : (
+                                <>
+                                  <Clock className="w-3 h-3" /> Submit
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => setEditing(null)}
+                              className="px-3 py-1 border border-gray-200 text-xs rounded-lg"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                          {!isAdmin && (
+                            <p className="text-[10px] text-amber-600">
+                              Will need admin approval
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <button
@@ -230,6 +277,7 @@ export default function AdminInventoryPage() {
                             setEditing({
                               id: item.id,
                               qty: item.stockQuantity.toString(),
+                              reason: "",
                             })
                           }
                           className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg hover:border-brand-300 hover:text-brand-600 transition-colors"

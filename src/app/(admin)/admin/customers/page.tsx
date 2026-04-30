@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, Eye } from "lucide-react";
+import { Search, Eye, Download } from "lucide-react";
 import { User, Pagination } from "@/types";
 import { apiGet } from "@/lib/api";
 import { formatPrice, formatDate } from "@/lib/utils";
@@ -10,12 +10,14 @@ import {
   TableRowSkeleton,
   EmptyState,
 } from "@/components/shared/loading-spinner";
+import { useAuthStore } from "@/store/authStore";
+import { useToast } from "@/store/uiStore";
 import Image from "next/image";
 
 const segmentColors: Record<string, string> = {
   NEW: "bg-blue-100 text-blue-700",
   REGULAR: "bg-gray-100 text-gray-700",
-  VIP: "bg-gold-100 text-gold-700",
+  VIP: "bg-yellow-100 text-yellow-700",
   WHOLESALE: "bg-purple-100 text-purple-700",
 };
 
@@ -25,6 +27,11 @@ export default function AdminCustomersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
+  const toast = useToast();
 
   const fetch = async () => {
     setIsLoading(true);
@@ -44,14 +51,50 @@ export default function AdminCustomersPage() {
     fetch();
   }, [page]);
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await apiGet<any>("/export/customers");
+      // res.data should be a CSV string or trigger download
+      const blob = new Blob([res.data || JSON.stringify(customers)], {
+        type: "text/csv",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Customers exported", "success");
+    } catch {
+      toast("Export failed", "error");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Customers</h1>
-        {pagination && (
-          <span className="text-sm text-gray-500">
-            {pagination.total.toLocaleString()} total
-          </span>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-gray-900">Customers</h1>
+          {pagination && (
+            <span className="text-sm text-gray-400">
+              {pagination.total.toLocaleString()} total
+            </span>
+          )}
+        </div>
+
+        {/* Export button — ADMIN only */}
+        {isAdmin && (
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-300 rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
         )}
       </div>
 

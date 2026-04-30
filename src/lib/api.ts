@@ -4,7 +4,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api/v1",
   withCredentials: true, // ✅ Sends httpOnly cookies (refresh token) automatically
-  timeout: 15000,
+  timeout: 30000, // 30s — Paystack initialize can be slow from Nigeria; 15s was too short
   headers: { "Content-Type": "application/json" },
 });
 
@@ -162,6 +162,14 @@ export const apiUpload = async <T>(
 
 export const getApiError = (error: unknown): string => {
   if (axios.isAxiosError(error)) {
+    // Timeout — give a user-friendly message instead of the raw axios string
+    if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+      return "The request took too long. Please check your connection and try again.";
+    }
+    // Network error (no response received)
+    if (!error.response) {
+      return "Unable to reach the server. Please check your internet connection.";
+    }
     const data = error.response?.data;
     if (data?.errors && Array.isArray(data.errors)) {
       return data.errors

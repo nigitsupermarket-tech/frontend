@@ -1,20 +1,5 @@
 "use client";
 // frontend/src/store/cartStore.ts
-//
-// GUEST CART STRATEGY
-// ───────────────────
-// Problem: calling POST /api/v1/cart for guests hit a race condition on the
-// unique index of `carts.sessionId` (fixed in the backend too), and caused
-// confusing "C: C already exists" errors in the toast.
-//
-// New approach:
-//   - GUEST (not logged in): cart items live ONLY in Zustand + localStorage.
-//     Zero API calls. Fast, offline-friendly, no DB race conditions.
-//   - LOGGED IN: cart syncs with the backend as before.
-//   - On LOGIN: guest items from localStorage are sent to POST /api/v1/cart/merge
-//     which adds them on top of any existing server-side cart, then clears localStorage.
-//
-// The `isGuest` flag in the store controls which path each action takes.
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -26,7 +11,6 @@ interface GuestCartItem {
   productId: string;
   quantity: number;
   price: number;
-  // Enough display info to show the cart drawer without an API fetch
   name: string;
   image: string;
   sku?: string;
@@ -34,24 +18,24 @@ interface GuestCartItem {
 }
 
 interface CartStore {
-  // Authenticated cart (from backend)
   items: CartItem[];
   subtotal: number;
   itemCount: number;
   isLoading: boolean;
   isOpen: boolean;
-
-  // Guest cart (localStorage only)
   guestItems: GuestCartItem[];
 
   fetchCart: () => Promise<void>;
-  addItem: (productId: string, quantity: number, productMeta?: Partial<GuestCartItem>) => Promise<void>;
+  addItem: (
+    productId: string,
+    quantity: number,
+    productMeta?: Partial<GuestCartItem>,
+  ) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   clearCart: () => Promise<void>;
   mergeCart: () => Promise<void>;
 
-  // Guest-specific
   addGuestItem: (item: GuestCartItem) => void;
   updateGuestItem: (productId: string, quantity: number) => void;
   removeGuestItem: (productId: string) => void;
@@ -85,23 +69,28 @@ export const useCartStore = create<CartStore>()(
       fetchCart: async () => {
         const isAuth = useAuthStore.getState().isAuthenticated;
         if (!isAuth) {
-          // For guest, derive totals from guestItems
           const { guestItems } = get();
-          const totals = calcGuestTotals(guestItems);
-          set({ subtotal: totals.subtotal, itemCount: totals.itemCount });
+          set({ ...calcGuestTotals(guestItems) });
           return;
         }
-
         set({ isLoading: true });
         try {
           const res = await apiGet<{
             success: boolean;
-            data: { items: CartItem[]; summary: { subtotal: number; itemCount: number } };
+            data: {
+              items: CartItem[];
+              summary: { subtotal: number; itemCount: number };
+            };
           }>("/cart");
           const { items, summary } = res.data;
-          set({ items: items || [], subtotal: summary?.subtotal || 0, itemCount: summary?.itemCount || 0 });
+          set({
+            items: items || [],
+            subtotal: summary?.subtotal || 0,
+            itemCount: summary?.itemCount || 0,
+          });
         } catch {
-          set({ items: [], subtotal: 0, itemCount: 0 });
+          // Do NOT wipe items on a failed fetch — keep whatever is currently
+          // in the store. A failed GET /cart should never blank the cart UI.
         } finally {
           set({ isLoading: false });
         }
@@ -111,20 +100,20 @@ export const useCartStore = create<CartStore>()(
         const isAuth = useAuthStore.getState().isAuthenticated;
 
         if (!isAuth) {
-          // ── GUEST: store locally, never call the API ──────────────────────
           const { guestItems } = get();
           const existing = guestItems.find((i) => i.productId === productId);
-
           if (existing) {
             const updated = guestItems.map((i) =>
               i.productId === productId
                 ? { ...i, quantity: i.quantity + quantity }
                 : i,
             );
-            const totals = calcGuestTotals(updated);
-            set({ guestItems: updated, ...totals, isOpen: true });
+            set({
+              guestItems: updated,
+              ...calcGuestTotals(updated),
+              isOpen: true,
+            });
           } else {
-            // productMeta must be supplied by the caller for guest mode
             const newItem: GuestCartItem = {
               productId,
               quantity,
@@ -135,22 +124,31 @@ export const useCartStore = create<CartStore>()(
               stockQuantity: productMeta?.stockQuantity || 999,
             };
             const updated = [...guestItems, newItem];
-            const totals = calcGuestTotals(updated);
-            set({ guestItems: updated, ...totals, isOpen: true });
+            set({
+              guestItems: updated,
+              ...calcGuestTotals(updated),
+              isOpen: true,
+            });
           }
           return;
         }
 
-        // ── AUTHENTICATED: call the API ───────────────────────────────────
         set({ isLoading: true });
         try {
           const res = await apiPost<{
             success: boolean;
-            data: { cart: { items: CartItem[] }; summary: { subtotal: number; itemCount: number } };
+            data: {
+              cart: { items: CartItem[] };
+              summary: { subtotal: number; itemCount: number };
+            };
           }>("/cart", { productId, quantity });
-
           const { cart, summary } = res.data;
-          set({ items: cart.items, subtotal: summary.subtotal, itemCount: summary.itemCount, isOpen: true });
+          set({
+            items: cart.items,
+            subtotal: summary.subtotal,
+            itemCount: summary.itemCount,
+            isOpen: true,
+          });
         } finally {
           set({ isLoading: false });
         }
@@ -160,16 +158,23 @@ export const useCartStore = create<CartStore>()(
         const { guestItems } = get();
         const existing = guestItems.find((i) => i.productId === item.productId);
         const updated = existing
-          ? guestItems.map((i) => i.productId === item.productId ? { ...i, quantity: i.quantity + item.quantity } : i)
+          ? guestItems.map((i) =>
+              i.productId === item.productId
+                ? { ...i, quantity: i.quantity + item.quantity }
+                : i,
+            )
           : [...guestItems, item];
         set({ guestItems: updated, ...calcGuestTotals(updated), isOpen: true });
       },
 
       updateGuestItem: (productId, quantity) => {
         const { guestItems } = get();
-        const updated = quantity <= 0
-          ? guestItems.filter((i) => i.productId !== productId)
-          : guestItems.map((i) => i.productId === productId ? { ...i, quantity } : i);
+        const updated =
+          quantity <= 0
+            ? guestItems.filter((i) => i.productId !== productId)
+            : guestItems.map((i) =>
+                i.productId === productId ? { ...i, quantity } : i,
+              );
         set({ guestItems: updated, ...calcGuestTotals(updated) });
       },
 
@@ -186,15 +191,32 @@ export const useCartStore = create<CartStore>()(
       updateItem: async (itemId, quantity) => {
         const isAuth = useAuthStore.getState().isAuthenticated;
         if (!isAuth) {
-          // For guest, itemId is actually productId in guest mode
           get().updateGuestItem(itemId, quantity);
           return;
         }
-        set({ isLoading: true });
+
+        // Optimistic update — update locally first, sync server in background
+        const prevItems = get().items;
+        const optimistic = prevItems.map((i) =>
+          i.id === itemId ? { ...i, quantity } : i,
+        );
+        set({ items: optimistic, ...calcTotals(optimistic) });
+
         try {
           await apiPut(`/cart/${itemId}`, { quantity });
-          await get().fetchCart();
-        } finally { set({ isLoading: false }); }
+          // Optimistic update is already applied — no need to re-fetch.
+          // Re-fetching risks wiping the cart if the GET arrives before the
+          // PUT commits, or if there's a brief auth/network hiccup.
+        } catch (err: any) {
+          if (err?.response?.status === 404) {
+            // Stale item ID — refresh to get current server state
+            await get().fetchCart();
+          } else {
+            // Real error — revert the optimistic update
+            set({ items: prevItems, ...calcTotals(prevItems) });
+          }
+          throw err;
+        }
       },
 
       removeItem: async (itemId) => {
@@ -203,34 +225,45 @@ export const useCartStore = create<CartStore>()(
           get().removeGuestItem(itemId);
           return;
         }
+
+        // Optimistic removal — remove from UI immediately, no rollback on 404
         const prevItems = get().items;
         const newItems = prevItems.filter((i) => i.id !== itemId);
         set({ items: newItems, ...calcTotals(newItems) });
+
         try {
           await apiDelete(`/cart/${itemId}`);
-          await get().fetchCart();
-        } catch {
-          set({ items: prevItems, ...calcTotals(prevItems) });
+          // Optimistic removal is already applied — only re-fetch if needed
+        } catch (err: any) {
+          if (err?.response?.status === 404) {
+            // Already gone — optimistic removal was correct, keep it
+          } else {
+            // Real error — restore the item
+            set({ items: prevItems, ...calcTotals(prevItems) });
+          }
         }
+        // Re-fetch only to sync fresh IDs (e.g. after a 404 stale-ID case above).
+        // We skip this on success because the optimistic state is already correct
+        // and a re-fetch risks a brief empty-cart flash if GET is slow.
       },
 
       clearCart: async () => {
         const isAuth = useAuthStore.getState().isAuthenticated;
-        if (!isAuth) { get().clearGuestCart(); return; }
-        const prevItems = get().items;
+        if (!isAuth) {
+          get().clearGuestCart();
+          return;
+        }
         set({ items: [], subtotal: 0, itemCount: 0 });
-        try { await apiDelete("/cart"); }
-        catch { set({ items: prevItems, ...calcTotals(prevItems) }); }
+        try {
+          await apiDelete("/cart");
+        } catch {}
       },
 
-      // Called after successful login — pushes guest items to the server cart
       mergeCart: async () => {
         const { guestItems } = get();
-
-        // First call the server merge endpoint (merges session cookie cart)
-        try { await apiPost("/cart/merge"); } catch {}
-
-        // Then push any localStorage guest items to the server cart
+        try {
+          await apiPost("/cart/merge");
+        } catch {}
         if (guestItems.length > 0) {
           for (const guestItem of guestItems) {
             try {
@@ -240,11 +273,8 @@ export const useCartStore = create<CartStore>()(
               });
             } catch {}
           }
-          // Clear guest items after merge
           set({ guestItems: [] });
         }
-
-        // Fetch the final merged cart from server
         await get().fetchCart();
       },
 
@@ -255,13 +285,11 @@ export const useCartStore = create<CartStore>()(
     {
       name: "nigitriple-cart",
       storage: createJSONStorage(() => localStorage),
-      // Only persist guest items — authenticated cart is always fetched fresh
       partialize: (state) => ({ guestItems: state.guestItems }),
     },
   ),
 );
 
-// Selectors
 export const useCartItems = () => useCartStore((s) => s.items);
 export const useGuestCartItems = () => useCartStore((s) => s.guestItems);
 export const useCartCount = () => useCartStore((s) => s.itemCount);
