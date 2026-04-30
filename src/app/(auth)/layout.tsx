@@ -11,7 +11,7 @@ export default function AuthLayout({
       <header className="container py-5">
         <Link href="/" className="inline-flex items-center gap-2">
           <span className="font-display text-2xl font-bold text-brand-700">
-            Nigi<span className="text-gold-500">Triple</span>
+            Nigit<span className="text-gold-500">Triple</span>
           </span>
         </Link>
       </header>
