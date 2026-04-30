@@ -1,14 +1,17 @@
 "use client";
 // frontend/src/app/(guest)/checkout/verify/page.tsx
-// Paystack redirects here after payment: /checkout/verify?reference=SBW-xxx-timestamp
+// Paystack redirects here after payment: /checkout/verify?reference=NGT-xxx-timestamp
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Loader2, CheckCircle, XCircle } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import Link from "next/link";
 
-export default function VerifyPage() {
+// ── Inner component that uses useSearchParams ─────────────────────────────────
+// Must be wrapped in <Suspense> because useSearchParams() opts the page out of
+// static prerendering. Without the boundary, Next.js cannot build the page.
+function VerifyContent() {
   const searchParams = useSearchParams();
   const reference = searchParams.get("reference");
 
@@ -36,7 +39,7 @@ export default function VerifyPage() {
       .catch(() => setStatus("failed"));
   }, [reference]);
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -51,7 +54,7 @@ export default function VerifyPage() {
     );
   }
 
-  // ── Success ──────────────────────────────────────────────────────────────────
+  // ── Success ────────────────────────────────────────────────────────────────
   if (status === "success") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -89,7 +92,7 @@ export default function VerifyPage() {
     );
   }
 
-  // ── Failed ───────────────────────────────────────────────────────────────────
+  // ── Failed ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white p-8 rounded-lg shadow text-center max-w-md w-full mx-4">
@@ -122,5 +125,26 @@ export default function VerifyPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Loading fallback shown while Suspense resolves ────────────────────────────
+function VerifyFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <Loader2 className="w-10 h-10 animate-spin text-green-600 mx-auto mb-4" />
+        <p className="text-gray-600 font-medium">Loading…</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Page export — Suspense boundary required for useSearchParams ──────────────
+export default function VerifyPage() {
+  return (
+    <Suspense fallback={<VerifyFallback />}>
+      <VerifyContent />
+    </Suspense>
   );
 }
