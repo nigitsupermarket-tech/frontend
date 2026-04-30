@@ -149,6 +149,9 @@ export const useCartStore = create<CartStore>()(
             itemCount: summary.itemCount,
             isOpen: true,
           });
+        } catch (err) {
+          // Re-throw so useCart.addToCart can catch and show the toast
+          throw err;
         } finally {
           set({ isLoading: false });
         }

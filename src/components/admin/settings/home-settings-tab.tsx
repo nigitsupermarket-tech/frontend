@@ -871,7 +871,7 @@ export default function AdminHomeSettingsTab() {
                   }
                   rows={2}
                   className={inputCls + " resize-none"}
-                  placeholder="NigiTriple carries the best Nigerian FMCG products at unbeatable prices..."
+                  placeholder="NigitTriple carries the best Nigerian FMCG products at unbeatable prices..."
                 />
               </div>
 

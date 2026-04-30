@@ -817,7 +817,7 @@ function MethodFormModal({
                 {
                   key: "name",
                   label: "Store Name",
-                  placeholder: "NigiTriple PH Store",
+                  placeholder: "NigitTriple PH Store",
                 },
                 {
                   key: "address",

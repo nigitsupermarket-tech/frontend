@@ -14,24 +14,71 @@ interface ProductMeta {
   stockQuantity?: number;
 }
 
+// Map raw API error messages to user-friendly equivalents
+function friendlyCartError(error: unknown): string {
+  const msg = getApiError(error);
+
+  // Already user-friendly messages from our backend — pass through
+  if (
+    msg.includes("out of stock") ||
+    msg.includes("available") ||
+    msg.includes("unavailable") ||
+    msg.includes("already have all") ||
+    msg.includes("can be added")
+  ) {
+    return msg;
+  }
+
+  // Network / timeout
+  if (
+    msg.toLowerCase().includes("timeout") ||
+    msg.toLowerCase().includes("network") ||
+    msg.toLowerCase().includes("server")
+  ) {
+    return "Connection issue — please try again";
+  }
+
+  // Cart conflict (the "c already exists" type errors are now caught server-side
+  // but handle any that slip through)
+  if (
+    msg.toLowerCase().includes("conflict") ||
+    msg.toLowerCase().includes("already exists") ||
+    msg.toLowerCase().includes("duplicate")
+  ) {
+    return "Cart sync issue — please refresh the page";
+  }
+
+  // Generic fallback
+  return msg || "Could not update cart — please try again";
+}
+
 export function useCart() {
   const store = useCartStore();
   const toast = useToast();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  // addToCart accepts optional product metadata needed for guest display
-  const addToCart = async (productId: string, quantity = 1, meta?: ProductMeta) => {
+  const addToCart = async (
+    productId: string,
+    quantity = 1,
+    meta?: ProductMeta,
+  ) => {
     try {
-      await store.addItem(productId, quantity, meta ? {
-        price: meta.price,
-        name: meta.name,
-        image: meta.image || "",
-        sku: meta.sku,
-        stockQuantity: meta.stockQuantity,
-      } : undefined);
+      await store.addItem(
+        productId,
+        quantity,
+        meta
+          ? {
+              price: meta.price,
+              name: meta.name,
+              image: meta.image || "",
+              sku: meta.sku,
+              stockQuantity: meta.stockQuantity,
+            }
+          : undefined,
+      );
       toast("Added to cart", "success");
     } catch (error) {
-      toast(getApiError(error), "error");
+      toast(friendlyCartError(error), "error");
     }
   };
 
@@ -40,7 +87,13 @@ export function useCart() {
     try {
       await store.updateItem(itemId, quantity);
     } catch (error) {
-      toast(getApiError(error), "error");
+      const msg = getApiError(error);
+      // 404 on update = stale item ID, trigger a re-fetch silently
+      if (msg.includes("not found") || msg.includes("404")) {
+        await store.fetchCart().catch(() => {});
+      } else {
+        toast(friendlyCartError(error), "error");
+      }
     }
   };
 
@@ -49,7 +102,13 @@ export function useCart() {
       await store.removeItem(itemId);
       toast("Item removed", "default");
     } catch (error) {
-      toast(getApiError(error), "error");
+      const msg = getApiError(error);
+      if (msg.includes("not found") || msg.includes("404")) {
+        // Item already gone — silently re-fetch to sync state
+        await store.fetchCart().catch(() => {});
+      } else {
+        toast(friendlyCartError(error), "error");
+      }
     }
   };
 
@@ -57,7 +116,7 @@ export function useCart() {
     try {
       await store.clearCart();
     } catch (error) {
-      toast(getApiError(error), "error");
+      toast(friendlyCartError(error), "error");
     }
   };
 
@@ -65,7 +124,7 @@ export function useCart() {
   const displayItems = isAuthenticated
     ? store.items
     : store.guestItems.map((g) => ({
-        id: g.productId, // use productId as id for guest items
+        id: g.productId,
         cartId: "",
         productId: g.productId,
         quantity: g.quantity,
