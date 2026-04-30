@@ -10,6 +10,9 @@ import {
   Plus,
   Package,
   Clock,
+  CheckCircle,
+  Building2,
+  ImageIcon,
 } from "lucide-react";
 import { Order } from "@/types";
 import { apiGet, apiPut, apiPost, getApiError } from "@/lib/api";
@@ -81,6 +84,7 @@ export default function AdminOrderDetailPage() {
     message: "",
     location: "",
   });
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [addingTracking, setAddingTracking] = useState(false);
   const [trackingUpdates, setTrackingUpdates] = useState<TrackingUpdate[]>([]);
   const toast = useToast();
@@ -126,6 +130,22 @@ export default function AdminOrderDetailPage() {
       toast(getApiError(err), "error");
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleConfirmBankTransfer = async () => {
+    if (!order) return;
+    if (!confirm("Confirm that you have received this bank transfer payment?"))
+      return;
+    setConfirmingPayment(true);
+    try {
+      await apiPost("/payment/bank-transfer/confirm", { orderId: order.id });
+      toast("Payment confirmed. Order is now CONFIRMED.", "success");
+      loadOrder();; // refresh
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setConfirmingPayment(false);
     }
   };
 
@@ -508,12 +528,26 @@ export default function AdminOrderDetailPage() {
             </address>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
-            <h2 className="font-semibold text-gray-900 mb-3">Payment</h2>
-            <div className="text-sm space-y-1">
+            <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-green-600" /> Payment
+            </h2>
+            <div className="text-sm space-y-1.5">
               <p className="text-gray-600">
                 Method:{" "}
                 <span className="font-medium text-gray-900">
-                  {order.paymentMethod}
+                  {order.paymentMethod === "BANK_TRANSFER"
+                    ? "Bank Transfer"
+                    : order.paymentMethod}
+                </span>
+              </p>
+              <p className="text-gray-600">
+                Status:{" "}
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${PAYMENT_STATUS_COLORS[order.paymentStatus]}`}
+                >
+                  {order.paymentStatus === "AWAITING_PROOF"
+                    ? "Awaiting Review"
+                    : order.paymentStatus}
                 </span>
               </p>
               {order.paymentReference && (
@@ -524,7 +558,77 @@ export default function AdminOrderDetailPage() {
                   </span>
                 </p>
               )}
+              {order.paidAt && (
+                <p className="text-gray-600">
+                  Paid at:{" "}
+                  <span className="font-medium text-gray-900">
+                    {formatDateTime(order.paidAt)}
+                  </span>
+                </p>
+              )}
             </div>
+
+            {/* ── Proof of payment — only for bank transfer orders ── */}
+            {order.paymentMethod === "BANK_TRANSFER" && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                {(order as any).proofOfPaymentUrl ? (
+                  <>
+                    <p className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+                      <ImageIcon className="w-3.5 h-3.5 text-green-600" />
+                      Customer Proof of Payment
+                    </p>
+                    <a
+                      href={(order as any).proofOfPaymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-xl overflow-hidden border border-gray-200 mb-3 hover:opacity-90 transition-opacity"
+                    >
+                      <Image
+                        src={(order as any).proofOfPaymentUrl}
+                        alt="Proof of payment"
+                        width={300}
+                        height={200}
+                        className="w-full object-cover max-h-48"
+                      />
+                    </a>
+                    {(order as any).proofSubmittedAt && (
+                      <p className="text-xs text-gray-400 mb-3">
+                        Submitted:{" "}
+                        {formatDateTime((order as any).proofSubmittedAt)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-400 italic mb-3">
+                    No proof of payment uploaded yet.
+                  </p>
+                )}
+
+                {/* Confirm button — only show if not yet paid */}
+                {order.paymentStatus !== "PAID" && (
+                  <button
+                    onClick={handleConfirmBankTransfer}
+                    disabled={confirmingPayment}
+                    className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
+                  >
+                    {confirmingPayment ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" /> Confirm Payment
+                        Received
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {order.paymentStatus === "PAID" && (
+                  <div className="flex items-center gap-2 text-green-700 text-sm font-medium">
+                    <CheckCircle className="w-4 h-4" /> Payment confirmed
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           {(order.trackingNumber || order.trackingUrl) && (
             <div className="bg-white rounded-2xl border border-gray-100 p-5">

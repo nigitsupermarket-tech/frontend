@@ -1,5 +1,5 @@
 "use client";
-// frontend/src/app/(guest)/checkout/page.tsx
+// frontend/src/app/(guest)/checkout/checkout-content.tsx
 // Shipping calculated at checkout using state + LGA for precise zone matching
 
 import { useState, useEffect, useMemo } from "react";
@@ -347,7 +347,7 @@ export default function CheckoutPageContent() {
     try {
       const res = await apiPost<any>("/shipping/calculate", {
         state,
-        lga: lga || undefined, // ← send LGA for precise zone matching
+        lga: lga || undefined,
         orderAmount: subtotal,
         weight: totalWeight,
         categoryIds: items
@@ -437,12 +437,15 @@ export default function CheckoutPageContent() {
       setOrderId(res.data.order.id);
 
       if (data.paymentMethod === "PAYSTACK") {
-        const payRes = await apiPost<any>("/payments/initialize", {
+        // FIX: use /payment (singular) to match the backend route prefix.
+        // Only send orderId — the server reads the amount from the DB,
+        // which is safer than trusting a client-supplied figure.
+        const payRes = await apiPost<any>("/payment/initialize", {
           orderId: res.data.order.id,
-          email: data.customerEmail,
-          amount: Math.round(total * 100),
         });
         clearCart();
+        // Redirect to Paystack hosted payment page.
+        // Paystack will redirect back to /checkout/verify?reference=xxx
         window.location.href = payRes.data.authorizationUrl;
       } else {
         clearCart();

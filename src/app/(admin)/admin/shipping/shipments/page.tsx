@@ -788,7 +788,7 @@ function AddTrackingEventModal({
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="flex-1 py-2.5 text-sm font-medium text-white bg-brand-600 rounded-xl hover:bg-brand-700 disabled:opacity-60 transition-colors"
+            className="flex-1 py-2.5 text-sm font-medium text-white bg-brand-600 rounded-xl hover:bg-brand-700 disablTed:opacity-60 transition-colors"
           >
             {loading ? "Adding…" : "Add Event"}
           </button>

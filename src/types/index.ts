@@ -250,7 +250,7 @@ export interface Order {
   userId?: string;
   user?: User;
   status: OrderStatus;
-  paymentStatus: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+  paymentStatus: PaymentStatus;
   paymentMethod: string;
   subtotal: number;
   discountAmount: number;
@@ -268,6 +268,9 @@ export interface Order {
   createdAt: string;
   updatedAt: string;
   paymentReference?: string;
+  paidAt?: string;
+  proofOfPaymentUrl?: string;
+  proofSubmittedAt?: string;
   statusHistory?: OrderStatusHistory[];
 }
 
@@ -554,7 +557,12 @@ export interface ProductFilters {
 // UTILITY TYPES
 // ============================================
 
-export type PaymentStatus = "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+export type PaymentStatus =
+  | "PENDING"
+  | "AWAITING_PROOF"
+  | "PAID"
+  | "FAILED"
+  | "REFUNDED";
 export type StockStatus = "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
 export type ProductStatus = "ACTIVE" | "INACTIVE" | "DRAFT";
 export type UserRole = "CUSTOMER" | "STAFF" | "ADMIN";
