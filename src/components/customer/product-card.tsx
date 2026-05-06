@@ -1,8 +1,5 @@
 "use client";
 // frontend/src/components/customer/product-card.tsx
-// Changes:
-// 1. Brand link → /brands/[slug] instead of /products?brandId=...
-// 2. Stars: only rendered when product.averageRating >= 4, filled dynamically (no fallback default)
 
 import { useState } from "react";
 import Link from "next/link";
@@ -26,7 +23,9 @@ export function ProductCard({ product, className }: ProductCardProps) {
     product.stockStatus === "OUT_OF_STOCK" || product.stockQuantity === 0;
   const discount =
     product.comparePrice && product.comparePrice > product.price
-      ? Math.round(((product.comparePrice - product.price) / product.comparePrice) * 100)
+      ? Math.round(
+          ((product.comparePrice - product.price) / product.comparePrice) * 100,
+        )
       : 0;
 
   const handleAdd = async () => {
@@ -53,7 +52,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
       className={cn(
         "bg-white border border-gray-200 rounded-sm overflow-hidden",
         "hover:shadow-md hover:border-gray-300 transition-all duration-200",
-        className
+        className,
       )}
     >
       {/* Title + Brand above the split */}
@@ -120,16 +119,24 @@ export function ProductCard({ product, className }: ProductCardProps) {
                   <span className="font-bold text-green-700 block sm:inline">
                     {product.unitsPerCarton} units
                   </span>
-                  <span className="text-gray-500"> / {product.netWeight || "carton"}</span>
+                  <span className="text-gray-500">
+                    {" "}
+                    / {product.netWeight || "carton"}
+                  </span>
                 </>
               ) : product.netWeight ? (
-                <span className="font-semibold text-green-700">{product.netWeight}</span>
+                <span className="font-semibold text-green-700">
+                  {product.netWeight}
+                </span>
               ) : null}
             </span>
 
             {/* ✅ Stars: only shown when hasReviews && rating >= 4 */}
             {showStars && (
-              <div className="flex gap-0.5 shrink-0 mt-0.5" title={`${rating.toFixed(1)} stars from ${product.reviewCount} reviews`}>
+              <div
+                className="flex gap-0.5 shrink-0 mt-0.5"
+                title={`${rating.toFixed(1)} stars from ${product.reviewCount} reviews`}
+              >
                 {[1, 2, 3, 4, 5].map((s) => (
                   <Star
                     key={s}
@@ -137,7 +144,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
                       "w-2 h-2 sm:w-2.5 sm:h-2.5",
                       s <= filledStars
                         ? "fill-amber-400 text-amber-400"
-                        : "fill-gray-200 text-gray-200"
+                        : "fill-gray-200 text-gray-200",
                     )}
                   />
                 ))}
@@ -146,32 +153,44 @@ export function ProductCard({ product, className }: ProductCardProps) {
           </div>
 
           {/* QTY */}
-          <div className="flex items-center gap-1">
-            <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
-              QTY:
-            </span>
-            <div className="flex items-center border border-gray-300">
-              <button
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                disabled={quantity <= 1}
-              >
-                <Minus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-              </button>
-              <span className="w-5 sm:w-7 text-center text-[10px] sm:text-xs font-medium text-gray-800">
-                {quantity}
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
+                QTY:
               </span>
-              <button
-                onClick={() =>
-                  setQuantity((q) =>
-                    product.trackInventory ? Math.min(q + 1, product.stockQuantity) : q + 1
-                  )
-                }
-                className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-              >
-                <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-              </button>
+              <div className="flex items-center border border-gray-300">
+                <button
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                  disabled={quantity <= 1}
+                >
+                  <Minus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                </button>
+                <span className="w-5 sm:w-7 text-center text-[10px] sm:text-xs font-medium text-gray-800">
+                  {quantity}
+                </span>
+                <button
+                  onClick={() =>
+                    setQuantity((q) =>
+                      product.trackInventory
+                        ? Math.min(q + 1, product.stockQuantity)
+                        : q + 1,
+                    )
+                  }
+                  disabled={
+                    product.trackInventory && quantity >= product.stockQuantity
+                  }
+                  className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                </button>
+              </div>
             </div>
+            {product.trackInventory && quantity >= product.stockQuantity && (
+              <p className="text-[8px] sm:text-[9px] text-red-500 font-medium leading-tight">
+                Max stock reached ({product.stockQuantity} available)
+              </p>
+            )}
           </div>
 
           {/* Price */}
@@ -203,8 +222,8 @@ export function ProductCard({ product, className }: ProductCardProps) {
                 addedFeedback
                   ? "bg-green-600 text-white"
                   : isOutOfStock
-                  ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                  : "bg-amber-400 hover:bg-amber-500 text-gray-900"
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-amber-400 hover:bg-amber-500 text-gray-900",
               )}
             >
               <ShoppingCart className="w-3 h-3 sm:w-3.5 sm:h-3.5" />

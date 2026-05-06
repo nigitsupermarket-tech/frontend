@@ -202,37 +202,44 @@ export function CartDrawer() {
                     </p>
                     <div className="flex items-center justify-between mt-2.5">
                       {/* Quantity stepper */}
-                      <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
-                        <button
-                          onClick={() =>
-                            updateQuantity(
-                              isGuest ? item.productId : item.id,
-                              item.quantity - 1,
-                            )
-                          }
-                          disabled={item.quantity <= 1 || isLoading}
-                          className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="w-8 text-center text-sm font-semibold text-gray-900 select-none">
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() =>
-                            updateQuantity(
-                              isGuest ? item.productId : item.id,
-                              item.quantity + 1,
-                            )
-                          }
-                          disabled={
-                            item.quantity >= item.product.stockQuantity ||
-                            isLoading
-                          }
-                          className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
+                          <button
+                            onClick={() =>
+                              updateQuantity(
+                                isGuest ? item.productId : item.id,
+                                item.quantity - 1,
+                              )
+                            }
+                            disabled={item.quantity <= 1 || isLoading}
+                            className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="w-8 text-center text-sm font-semibold text-gray-900 select-none">
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() =>
+                              updateQuantity(
+                                isGuest ? item.productId : item.id,
+                                item.quantity + 1,
+                              )
+                            }
+                            disabled={
+                              item.quantity >= item.product.stockQuantity ||
+                              isLoading
+                            }
+                            className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                        {item.quantity >= item.product.stockQuantity && (
+                          <p className="text-[10px] text-red-500 font-medium leading-tight text-center">
+                            Max stock ({item.product.stockQuantity}) reached
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-bold text-gray-900">

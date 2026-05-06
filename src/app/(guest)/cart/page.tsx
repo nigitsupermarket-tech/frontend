@@ -87,26 +87,39 @@ export default function CartPage() {
                   {formatPrice(item.price)}
                 </p>
                 <div className="flex items-center justify-between mt-3">
-                  <div className="flex items-center gap-1 border border-gray-200 rounded-xl px-1">
-                    <button
-                      onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                      disabled={item.quantity <= 1 || isLoading}
-                      className="p-2 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="w-8 text-center font-semibold text-sm">
-                      {item.quantity}
-                    </span>
-                    <button
-                      onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                      disabled={
-                        item.quantity >= item.product.stockQuantity || isLoading
-                      }
-                      className="p-2 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1 border border-gray-200 rounded-xl px-1">
+                      <button
+                        onClick={() =>
+                          updateQuantity(item.id, item.quantity - 1)
+                        }
+                        disabled={item.quantity <= 1 || isLoading}
+                        className="p-2 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-8 text-center font-semibold text-sm">
+                        {item.quantity}
+                      </span>
+                      <button
+                        onClick={() =>
+                          updateQuantity(item.id, item.quantity + 1)
+                        }
+                        disabled={
+                          item.quantity >= item.product.stockQuantity ||
+                          isLoading
+                        }
+                        className="p-2 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {item.quantity >= item.product.stockQuantity && (
+                      <p className="text-xs text-red-500 font-medium leading-tight text-center">
+                        Max available stock ({item.product.stockQuantity})
+                        reached
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-semibold text-gray-900">
