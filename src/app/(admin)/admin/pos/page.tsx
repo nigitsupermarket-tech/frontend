@@ -46,6 +46,7 @@ interface Product {
   price: number;
   stockQuantity: number;
   images: string[];
+  trackInventory: boolean;
   netWeight?: string;
   unitsPerCarton?: number;
   category?: { name: string };
@@ -352,11 +353,15 @@ function CartItemRow({
               onQtyChange(item.quantity + 1);
             }}
             disabled={
-              !!(item.product.trackInventory && item.quantity >= (item.product.stockQuantity ?? Infinity))
+              !!(
+                item.product.trackInventory &&
+                item.quantity >= (item.product.stockQuantity ?? Infinity)
+              )
             }
             className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
             title={
-              item.product.trackInventory && item.quantity >= (item.product.stockQuantity ?? Infinity)
+              item.product.trackInventory &&
+              item.quantity >= (item.product.stockQuantity ?? Infinity)
                 ? `Max stock reached (${item.product.stockQuantity})`
                 : undefined
             }
@@ -716,7 +721,9 @@ export default function POSPage() {
   // ── Camera scanner: start ZXing multi-format reader on the video element ──
   const stopCameraScanner = () => {
     if (scannerControlsRef.current) {
-      try { scannerControlsRef.current.stop(); } catch {}
+      try {
+        scannerControlsRef.current.stop();
+      } catch {}
       scannerControlsRef.current = null;
     }
     // Stop all camera tracks
@@ -749,7 +756,7 @@ export default function POSPage() {
             handleBarcode(code);
           }
           // Suppress frame-by-frame "not found" errors — they are normal
-          if (error && !(error.message?.includes("No MultiFormat"))) {
+          if (error && !error.message?.includes("No MultiFormat")) {
             // silent
           }
         },
@@ -771,7 +778,9 @@ export default function POSPage() {
       const existing = prev.find((i) => i.product.id === product.id);
       if (existing) {
         // Don't exceed stock if inventory is tracked
-        const maxQty = product.trackInventory ? (product.stockQuantity ?? Infinity) : Infinity;
+        const maxQty = product.trackInventory
+          ? (product.stockQuantity ?? Infinity)
+          : Infinity;
         if (existing.quantity >= maxQty) {
           // Can't add more — toast is outside setCart so we trigger after
           return prev;
@@ -787,7 +796,11 @@ export default function POSPage() {
     });
     // Warn if at stock limit
     const inCart = cart.find((i) => i.product.id === product.id);
-    if (inCart && product.trackInventory && inCart.quantity >= (product.stockQuantity ?? Infinity)) {
+    if (
+      inCart &&
+      product.trackInventory &&
+      inCart.quantity >= (product.stockQuantity ?? Infinity)
+    ) {
       toast(`Stock limit reached for ${product.name}`, "error");
     }
     setShowSearch(false);
@@ -1492,7 +1505,9 @@ export default function POSPage() {
             <div className="flex items-center justify-between px-5 py-4 border-b">
               <div className="flex items-center gap-2">
                 <Camera className="w-5 h-5 text-amber-500" />
-                <span className="font-bold text-gray-900">Scan Product Barcode</span>
+                <span className="font-bold text-gray-900">
+                  Scan Product Barcode
+                </span>
               </div>
               <button onClick={stopCameraScanner}>
                 <X className="w-5 h-5 text-gray-400 hover:text-gray-700" />
@@ -1520,7 +1535,10 @@ export default function POSPage() {
                   {/* Scan line animation */}
                   <div
                     className="absolute left-1 right-1 h-0.5 bg-amber-400 opacity-80"
-                    style={{ animation: "scanline 1.8s linear infinite", top: "50%" }}
+                    style={{
+                      animation: "scanline 1.8s linear infinite",
+                      top: "50%",
+                    }}
                   />
                 </div>
               </div>
@@ -1571,7 +1589,9 @@ export default function POSPage() {
             <div id="receipt-content" className="p-5 font-mono text-xs">
               <div className="text-center mb-3">
                 <p className="font-bold text-base">NigitTriple Supermarket</p>
-                <p className="text-gray-500">30, Abuloma Road (Bozgomero Estate)</p>
+                <p className="text-gray-500">
+                  30, Abuloma Road (Bozgomero Estate)
+                </p>
                 <p className="text-gray-500">Port Harcourt, Rivers State</p>
                 <p className="text-gray-500">Tel: +234 916 977 6138</p>
                 <div className="border-t border-dashed border-gray-300 my-2" />
