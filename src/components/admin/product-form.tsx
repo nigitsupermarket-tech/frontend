@@ -9,6 +9,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, Plus, X, Tag } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
+import { useAuthStore } from "@/store/authStore";
 import { generateSlug } from "@/lib/utils";
 import { Category, Brand } from "@/types";
 import { PageLoader } from "@/components/shared/loading-spinner";
@@ -105,6 +106,8 @@ const emptyForm = {
 
 export default function ProductForm({ productId, onSave }: Props) {
   const toast = useToast();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
   const [isLoading, setIsLoading] = useState(!!productId);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -222,6 +225,70 @@ export default function ProductForm({ productId, onSave }: Props) {
 
     setSaving(true);
     try {
+      // ── Non-admin stock change: route through approval workflow ──────────
+      // When a Staff or Sales user edits an existing product and the
+      // stockQuantity field has changed, we submit a stock-approval request
+      // instead of writing it directly. Other fields are still saved normally.
+      if (!isAdmin && productId) {
+        const originalRes = await apiGet<any>(`/products/${productId}`);
+        const originalQty: number =
+          originalRes.data?.product?.stockQuantity ?? 0;
+        const newQty = Number(form.stockQuantity);
+
+        if (newQty !== originalQty) {
+          // Submit stock change for admin approval
+          const approvalRes = await apiPost<any>("/stock-approvals", {
+            productId,
+            requestedQty: newQty,
+            reason: `Product form edit by ${user?.name || "staff"} (${user?.role})`,
+            source: "PRODUCT_FORM",
+          });
+
+          if (approvalRes.data?.autoApproved) {
+            toast.success("Stock updated");
+          } else {
+            toast.success(
+              "Stock change submitted — awaiting admin approval. Other product fields saved.",
+            );
+          }
+
+          // Save the rest of the product without the stockQuantity override
+          const images = form.media
+            .filter((m) => m.type === "image")
+            .map((m) => m.url);
+          const nutritionalInfo: any = {};
+          Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
+            if (v) nutritionalInfo[k] = parseFloat(v as string);
+          });
+          const payloadNoStock: any = {
+            name: form.name,
+            slug: form.slug || generateSlug(form.name),
+            description: form.description,
+            shortDescription: form.shortDescription,
+            price: parseFloat(form.price),
+            comparePrice: form.comparePrice ? parseFloat(form.comparePrice) : undefined,
+            costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
+            sku: form.sku,
+            barcode: form.barcode || undefined,
+            categoryId: form.categoryId,
+            brandId: form.brandId || undefined,
+            tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+            images,
+            lowStockThreshold: Number(form.lowStockThreshold),
+            allowBackorder: form.allowBackorder,
+            trackInventory: form.trackInventory,
+            isFeatured: form.isFeatured,
+            isNewArrival: form.isNewArrival,
+            isOnPromotion: form.isOnPromotion,
+            promotionEndsAt: form.promotionEndsAt ? new Date(form.promotionEndsAt).toISOString() : null,
+            status: form.status,
+          };
+          await apiPut(`/products/${productId}`, payloadNoStock);
+          onSave?.();
+          setSaving(false);
+          return;
+        }
+      }
       const images = form.media
         .filter((m) => m.type === "image")
         .map((m) => m.url);
@@ -803,6 +870,14 @@ export default function ProductForm({ productId, onSave }: Props) {
       {activeTab === "inventory" && (
         <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
           <h3 className="font-semibold text-gray-900">Inventory Management</h3>
+          {!isAdmin && productId && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              <span className="text-amber-500 mt-0.5">⚠️</span>
+              <span>
+                Stock quantity changes require admin approval. Your request will be reviewed before the stock is updated.
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Input
               label="Stock Quantity"

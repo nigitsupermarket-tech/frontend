@@ -30,6 +30,7 @@ import {
   DollarSign,
   Grid3x3,
   LayoutList,
+  Camera,
 } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -345,8 +346,20 @@ function CartItemRow({
             {item.quantity}
           </span>
           <button
-            onClick={() => onQtyChange(item.quantity + 1)}
-            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200"
+            onClick={() => {
+              const stock = item.product.stockQuantity ?? Infinity;
+              if (item.product.trackInventory && item.quantity >= stock) return;
+              onQtyChange(item.quantity + 1);
+            }}
+            disabled={
+              !!(item.product.trackInventory && item.quantity >= (item.product.stockQuantity ?? Infinity))
+            }
+            className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+            title={
+              item.product.trackInventory && item.quantity >= (item.product.stockQuantity ?? Infinity)
+                ? `Max stock reached (${item.product.stockQuantity})`
+                : undefined
+            }
           >
             <Plus className="w-2.5 h-2.5" />
           </button>
@@ -591,6 +604,11 @@ export default function POSPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
+  // ── Camera barcode scanner state ──────────────────────────────────────────
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+
   // ✅ FIX 3: Load products + categories when grid mode is activated
   useEffect(() => {
     if (productGridMode !== "grid") return;
@@ -695,18 +713,83 @@ export default function POSPage() {
     }
   };
 
+  // ── Camera scanner: start ZXing multi-format reader on the video element ──
+  const stopCameraScanner = () => {
+    if (scannerControlsRef.current) {
+      try { scannerControlsRef.current.stop(); } catch {}
+      scannerControlsRef.current = null;
+    }
+    // Stop all camera tracks
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    setShowCameraScanner(false);
+  };
+
+  const startCameraScanner = async () => {
+    setShowCameraScanner(true);
+    // Dynamically import ZXing so it doesn't bloat initial bundle
+    try {
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader();
+
+      // Wait a tick for the video element to mount
+      await new Promise((r) => setTimeout(r, 200));
+      if (!videoRef.current) return;
+
+      const controls = await reader.decodeFromConstraints(
+        { video: { facingMode: "environment" } },
+        videoRef.current,
+        (result, error) => {
+          if (result) {
+            const code = result.getText();
+            stopCameraScanner();
+            handleBarcode(code);
+          }
+          // Suppress frame-by-frame "not found" errors — they are normal
+          if (error && !(error.message?.includes("No MultiFormat"))) {
+            // silent
+          }
+        },
+      );
+      scannerControlsRef.current = controls;
+    } catch (err: any) {
+      toast(
+        err?.message?.includes("Permission")
+          ? "Camera permission denied. Please allow camera access."
+          : "Could not start camera scanner.",
+        "error",
+      );
+      setShowCameraScanner(false);
+    }
+  };
+
   const addToCart = (product: Product) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.product.id === product.id);
-      if (existing)
+      if (existing) {
+        // Don't exceed stock if inventory is tracked
+        const maxQty = product.trackInventory ? (product.stockQuantity ?? Infinity) : Infinity;
+        if (existing.quantity >= maxQty) {
+          // Can't add more — toast is outside setCart so we trigger after
+          return prev;
+        }
         return prev.map((i) =>
           i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i,
         );
+      }
       return [
         ...prev,
         { product, quantity: 1, unitPrice: product.price, discount: 0 },
       ];
     });
+    // Warn if at stock limit
+    const inCart = cart.find((i) => i.product.id === product.id);
+    if (inCart && product.trackInventory && inCart.quantity >= (product.stockQuantity ?? Infinity)) {
+      toast(`Stock limit reached for ${product.name}`, "error");
+    }
     setShowSearch(false);
     setSearchQuery("");
     setSearchResults([]);
@@ -988,6 +1071,15 @@ export default function POSPage() {
                       }}
                     />
                   </div>
+                  {/* Camera scan button */}
+                  <button
+                    onClick={startCameraScanner}
+                    title="Scan with camera"
+                    className="flex items-center gap-1.5 px-3 py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded transition-colors"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span className="hidden sm:inline">Camera</span>
+                  </button>
                 </div>
 
                 {/* Search results dropdown */}
@@ -1393,6 +1485,74 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* ── Camera Barcode Scanner Modal ── */}
+      {showCameraScanner && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-amber-500" />
+                <span className="font-bold text-gray-900">Scan Product Barcode</span>
+              </div>
+              <button onClick={stopCameraScanner}>
+                <X className="w-5 h-5 text-gray-400 hover:text-gray-700" />
+              </button>
+            </div>
+
+            {/* Video viewfinder */}
+            <div className="relative bg-black">
+              <video
+                ref={videoRef}
+                className="w-full"
+                style={{ maxHeight: "320px", objectFit: "cover" }}
+                autoPlay
+                muted
+                playsInline
+              />
+              {/* Targeting overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="relative w-52 h-32">
+                  {/* Corner brackets */}
+                  <span className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-amber-400 rounded-tl" />
+                  <span className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-amber-400 rounded-tr" />
+                  <span className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-amber-400 rounded-bl" />
+                  <span className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-amber-400 rounded-br" />
+                  {/* Scan line animation */}
+                  <div
+                    className="absolute left-1 right-1 h-0.5 bg-amber-400 opacity-80"
+                    style={{ animation: "scanline 1.8s linear infinite", top: "50%" }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 text-center space-y-2">
+              <p className="text-sm text-gray-600">
+                Point the camera at the product barcode or QR code
+              </p>
+              <p className="text-xs text-gray-400">
+                Supports EAN-13, EAN-8, Code128, QR Code, and more
+              </p>
+              <button
+                onClick={stopCameraScanner}
+                className="mt-2 px-5 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          {/* Scanline keyframe animation injected inline */}
+          <style>{`
+            @keyframes scanline {
+              0%   { top: 10%; }
+              50%  { top: 90%; }
+              100% { top: 10%; }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* ── Receipt Modal ── */}
       {showReceipt && completedOrder && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -1411,7 +1571,9 @@ export default function POSPage() {
             <div id="receipt-content" className="p-5 font-mono text-xs">
               <div className="text-center mb-3">
                 <p className="font-bold text-base">NigitTriple Supermarket</p>
+                <p className="text-gray-500">30, Abuloma Road (Bozgomero Estate)</p>
                 <p className="text-gray-500">Port Harcourt, Rivers State</p>
+                <p className="text-gray-500">Tel: +234 916 977 6138</p>
                 <div className="border-t border-dashed border-gray-300 my-2" />
                 <p className="text-gray-600">
                   Receipt #{completedOrder.receiptNumber}
@@ -1484,6 +1646,9 @@ export default function POSPage() {
               </div>
               <div className="border-t border-dashed border-gray-300 mt-3 pt-2 text-center text-gray-500">
                 <p>Thank you for shopping!</p>
+                <p className="text-gray-400 text-[10px] mt-2">
+                  Software by Calstins Ltd · calstins.com
+                </p>
               </div>
             </div>
             <div className="p-4 border-t flex gap-3">

@@ -11,9 +11,10 @@ import {
   Upload,
   X,
   ArrowUpDown,
+  Package,
 } from "lucide-react";
 import { Product, Pagination } from "@/types";
-import { apiGet, apiDelete, getApiError } from "@/lib/api";
+import { apiGet, apiDelete, apiPost, getApiError } from "@/lib/api";
 import { formatPrice, formatNumber } from "@/lib/utils";
 import {
   TableRowSkeleton,
@@ -22,6 +23,7 @@ import {
 } from "@/components/shared/loading-spinner";
 import { useToast } from "@/store/uiStore";
 import { ImportExportModal } from "@/components/admin/products/import-export-modal";
+import { useAuthStore } from "@/store/authStore";
 import Image from "next/image";
 
 const stockColors: Record<string, string> = {
@@ -68,6 +70,17 @@ export default function AdminProductsPage() {
     stockStatus: "",
     sort: "newest",
   });
+
+  // Quick-stock modal for non-admin roles
+  const [quickStock, setQuickStock] = useState<{
+    product: Product;
+    qty: string;
+    reason: string;
+  } | null>(null);
+  const [savingStock, setSavingStock] = useState(false);
+
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
   const toast = useToast();
 
   useEffect(() => {
@@ -135,6 +148,10 @@ export default function AdminProductsPage() {
     filters.stockStatus;
 
   const handleDelete = async (id: string, name: string) => {
+    if (!isAdmin) {
+      toast("Only admins can delete products", "error");
+      return;
+    }
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
     try {
       await apiDelete(`/products/${id}`);
@@ -142,6 +159,30 @@ export default function AdminProductsPage() {
       fetchProducts(page, filters);
     } catch (err) {
       toast(getApiError(err), "error");
+    }
+  };
+
+  const submitQuickStock = async () => {
+    if (!quickStock) return;
+    setSavingStock(true);
+    try {
+      const res = await apiPost<any>("/stock-approvals", {
+        productId: quickStock.product.id,
+        requestedQty: Number(quickStock.qty),
+        reason: quickStock.reason || `Quick stock update by ${user?.name || "staff"}`,
+        source: "PRODUCT_LIST",
+      });
+      if (res.data?.autoApproved) {
+        toast("Stock updated", "success");
+      } else {
+        toast("Stock change request submitted for admin approval", "success");
+      }
+      setQuickStock(null);
+      fetchProducts(page, filters);
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setSavingStock(false);
     }
   };
 
@@ -405,6 +446,22 @@ export default function AdminProductsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {/* Non-admin: quick stock button */}
+                        {!isAdmin && (
+                          <button
+                            onClick={() =>
+                              setQuickStock({
+                                product,
+                                qty: String(product.stockQuantity),
+                                reason: "",
+                              })
+                            }
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                            title="Update Stock"
+                          >
+                            <Package className="w-4 h-4" />
+                          </button>
+                        )}
                         <Link
                           href={`/admin/products/${product.id}`}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
@@ -412,13 +469,18 @@ export default function AdminProductsPage() {
                         >
                           <Edit2 className="w-4 h-4" />
                         </Link>
-                        <button
-                          onClick={() => handleDelete(product.id, product.name)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {/* Only admins can delete */}
+                        {isAdmin && (
+                          <button
+                            onClick={() =>
+                              handleDelete(product.id, product.name)
+                            }
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -461,6 +523,72 @@ export default function AdminProductsPage() {
         onClose={() => setShowImportExport(false)}
         onSuccess={() => fetchProducts(page, filters)}
       />
+
+      {/* Quick Stock Update Modal (Staff / Sales) */}
+      {quickStock && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-gray-900">Update Stock</h2>
+              <button onClick={() => setQuickStock(null)}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 truncate">
+              {quickStock.product.name}
+            </p>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              ⚠️ This request will be sent to admin for approval before the stock is updated.
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                New Stock Quantity
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={quickStock.qty}
+                onChange={(e) =>
+                  setQuickStock({ ...quickStock, qty: e.target.value })
+                }
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Current: {quickStock.product.stockQuantity} units
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Reason (optional)
+              </label>
+              <input
+                type="text"
+                value={quickStock.reason}
+                onChange={(e) =>
+                  setQuickStock({ ...quickStock, reason: e.target.value })
+                }
+                placeholder="e.g. Received new delivery"
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setQuickStock(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitQuickStock}
+                disabled={savingStock}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-60"
+              >
+                {savingStock ? "Submitting…" : "Submit Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

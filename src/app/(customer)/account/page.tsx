@@ -18,7 +18,8 @@ import { formatPrice, formatDate } from "@/lib/utils";
 export default function AccountPage() {
   const { user } = useAuthStore();
   const { logout } = useAuth();
-  const isAdmin = user?.role === "ADMIN" || user?.role === "STAFF";
+  const isAdmin =
+    user?.role === "ADMIN" || user?.role === "STAFF" || user?.role === "SALES";
 
   const menuItems = [
     {

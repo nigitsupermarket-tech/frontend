@@ -170,7 +170,9 @@ export default function POSOrdersPage() {
       </head>
       <body>
         <div class="center bold large">NigitTriple Supermarket</div>
+        <div class="center">30, Abuloma Road (Bozgomero Estate)</div>
         <div class="center">Port Harcourt, Rivers State</div>
+        <div class="center">Tel: +234 916 977 6138</div>
         <div class="divider"></div>
         <div class="center">Receipt: ${order.receiptNumber}</div>
         <div class="center">${new Date(order.createdAt).toLocaleString("en-NG")}</div>
@@ -199,6 +201,8 @@ export default function POSOrdersPage() {
         <div class="center">Thank you for shopping!</div>
         <div class="center">Goods sold are not returnable</div>
         <div class="center">without receipt within 7 days</div>
+        <div class="divider"></div>
+        <div class="center" style="font-size:10px;color:#999;">Software by Calstins Ltd &middot; calstins.com</div>
       </body>
       </html>
     `);

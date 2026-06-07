@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, LogOut, Settings, Menu } from "lucide-react";
+import { Bell, LogOut, Settings, Menu, User } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/store/authStore";
@@ -69,6 +69,15 @@ export function AdminHeader() {
                 </div>
                 <nav className="p-1">
                   <Link
+                    href="/admin/account"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                  >
+                    <User className="w-4 h-4 text-gray-400" />
+                    My Account
+                  </Link>
+                  {user?.role === "ADMIN" && (
+                  <Link
                     href="/admin/settings"
                     onClick={() => setUserMenuOpen(false)}
                     className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
@@ -76,6 +85,7 @@ export function AdminHeader() {
                     <Settings className="w-4 h-4 text-gray-400" />
                     Settings
                   </Link>
+                  )}
                   <button
                     onClick={() => {
                       setUserMenuOpen(false);
