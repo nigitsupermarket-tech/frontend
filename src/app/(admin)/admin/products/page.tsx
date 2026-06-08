@@ -169,7 +169,8 @@ export default function AdminProductsPage() {
       const res = await apiPost<any>("/stock-approvals", {
         productId: quickStock.product.id,
         requestedQty: Number(quickStock.qty),
-        reason: quickStock.reason || `Quick stock update by ${user?.name || "staff"}`,
+        reason:
+          quickStock.reason || `Quick stock update by ${user?.name || "staff"}`,
         source: "PRODUCT_LIST",
       });
       if (res.data?.autoApproved) {
@@ -411,7 +412,9 @@ export default function AdminProductsPage() {
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">
                       <p>{product.sku}</p>
                       {product.barcode && (
-                        <p className="text-gray-400 mt-0.5">{product.barcode}</p>
+                        <p className="text-gray-400 mt-0.5">
+                          {product.barcode}
+                        </p>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -541,7 +544,8 @@ export default function AdminProductsPage() {
               {quickStock.product.name}
             </p>
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
-              ⚠️ This request will be sent to admin for approval before the stock is updated.
+              ⚠️ This request will be sent to admin for approval before the
+              stock is updated.
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
