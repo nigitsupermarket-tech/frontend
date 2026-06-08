@@ -227,7 +227,7 @@ export default function AdminProductsPage() {
               onChange={(e) =>
                 setFilters((f) => ({ ...f, search: e.target.value }))
               }
-              placeholder="Search products, SKU…"
+              placeholder="Search name, SKU, barcode…"
               className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
             />
           </form>
@@ -321,7 +321,7 @@ export default function AdminProductsPage() {
               <tr className="border-b border-gray-50 bg-gray-50/50">
                 {[
                   "Product",
-                  "SKU",
+                  "SKU / Barcode",
                   "Price",
                   "Stock",
                   "Status",
@@ -409,7 +409,10 @@ export default function AdminProductsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                      {product.sku}
+                      <p>{product.sku}</p>
+                      {product.barcode && (
+                        <p className="text-gray-400 mt-0.5">{product.barcode}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold text-gray-900">

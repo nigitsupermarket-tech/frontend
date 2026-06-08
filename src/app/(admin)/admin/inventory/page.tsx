@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, Clock } from "lucide-react";
+import { Package, Clock, Search } from "lucide-react";
 import { apiGet, apiPost, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -15,6 +15,7 @@ interface InventoryItem {
   id: string;
   name: string;
   sku: string;
+  barcode?: string;
   images: string[];
   stockQuantity: number;
   lowStockThreshold: number;
@@ -32,6 +33,7 @@ export default function AdminInventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "low" | "out">("all");
+  const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<{
     id: string;
     qty: string;
@@ -42,6 +44,18 @@ export default function AdminInventoryPage() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
   const toast = useToast();
+
+  // Filtered items by search
+  const filteredItems = items.filter((item) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      item.name.toLowerCase().includes(q) ||
+      item.sku.toLowerCase().includes(q) ||
+      (item.barcode && item.barcode.toLowerCase().includes(q)) ||
+      (item.category?.name && item.category.name.toLowerCase().includes(q))
+    );
+  });
 
   const fetchItems = async () => {
     setIsLoading(true);
@@ -101,7 +115,7 @@ export default function AdminInventoryPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">
             Inventory Management
@@ -113,20 +127,25 @@ export default function AdminInventoryPage() {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
-          {(
-            [
-              ["all", "All"],
-              ["low", "Low Stock"],
-              ["out", "Out of Stock"],
-            ] as const
-          ).map(([v, l]) => (
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, SKU, barcode…"
+              className="pl-8 pr-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-brand-400 w-52"
+            />
+          </div>
+          {(["all", "low", "out"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setFilter(v)}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${filter === v ? "bg-brand-600 text-white" : "border border-gray-200 text-gray-600 hover:border-brand-300"}`}
             >
-              {l}
+              {v === "all" ? "All" : v === "low" ? "Low Stock" : "Out of Stock"}
             </button>
           ))}
         </div>
@@ -139,7 +158,7 @@ export default function AdminInventoryPage() {
               <tr className="border-b border-gray-50 bg-gray-50/50">
                 {[
                   "Product",
-                  "SKU",
+                  "SKU / Barcode",
                   "Category",
                   "Stock",
                   "Threshold",
@@ -160,18 +179,18 @@ export default function AdminInventoryPage() {
                 Array.from({ length: 10 }).map((_, i) => (
                   <TableRowSkeleton key={i} cols={7} />
                 ))
-              ) : items.length === 0 ? (
+              ) : filteredItems.length === 0 ? (
                 <tr>
                   <td colSpan={7}>
                     <EmptyState
                       icon={<Package className="w-12 h-12" />}
-                      title="No inventory issues"
-                      description="All products are well stocked"
+                      title={search ? "No items match your search" : "No inventory issues"}
+                      description={search ? "Try a different name, SKU or barcode" : "All products are well stocked"}
                     />
                   </td>
                 </tr>
               ) : (
-                items.map((item) => (
+                filteredItems.map((item) => (
                   <tr
                     key={item.id}
                     className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
@@ -194,7 +213,10 @@ export default function AdminInventoryPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                      {item.sku}
+                      <p>{item.sku}</p>
+                      {item.barcode && (
+                        <p className="text-gray-400 mt-0.5">{item.barcode}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {item.category?.name || "—"}
