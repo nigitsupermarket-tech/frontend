@@ -10,6 +10,7 @@ import { ArrowLeft, Loader2, Plus, X, Tag } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import { useRouter } from "next/navigation";
 import { generateSlug } from "@/lib/utils";
 import { Category, Brand } from "@/types";
 import { PageLoader } from "@/components/shared/loading-spinner";
@@ -106,8 +107,17 @@ const emptyForm = {
 
 export default function ProductForm({ productId, onSave }: Props) {
   const toast = useToast();
+  const router = useRouter();
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
+
+  // SALES role cannot create new products — redirect to product list
+  useEffect(() => {
+    if (!productId && user?.role === "SALES") {
+      toast("Sales role cannot create new products", "error");
+      router.replace("/admin/products");
+    }
+  }, [productId, user?.role]);
   const [isLoading, setIsLoading] = useState(!!productId);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);

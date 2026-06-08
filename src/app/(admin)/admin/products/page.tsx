@@ -202,7 +202,7 @@ export default function AdminProductsPage() {
           </button>
           <Link
             href="/admin/products/new"
-            className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors"
+            className={`flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors ${user?.role === "SALES" ? "hidden" : ""}`}
           >
             <Plus className="w-4 h-4" /> Add Product
           </Link>
@@ -371,7 +371,7 @@ export default function AdminProductsPage() {
                         ) : (
                           <Link
                             href="/admin/products/new"
-                            className="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm"
+                            className={`px-4 py-2 bg-brand-600 text-white rounded-xl text-sm ${user?.role === "SALES" ? "hidden" : ""}`}
                           >
                             Add your first product
                           </Link>

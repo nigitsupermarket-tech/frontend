@@ -64,7 +64,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Products",
     icon: Package,
-    roles: ["ADMIN", "STAFF"],
+    roles: ["ADMIN", "STAFF", "SALES"],
     children: [
       { label: "All Products", href: "/admin/products" },
       { label: "Add Product", href: "/admin/products/new" },
@@ -315,8 +315,20 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         children: item.children?.filter((c) => c.label !== "POS Sessions"),
       };
     }
+    // Products: SALES cannot create new products — hide "Add Product"
+    if (item.label === "Products" && role === "SALES") {
+      return {
+        ...item,
+        children: item.children?.filter((c) => c.label !== "Add Product"),
+      };
+    }
     return item;
   });
+
+  // Remove standalone Promotions item for SALES now that it's inside Products
+  visibleItems = visibleItems.filter(
+    (item) => !(item.label === "Promotions" && role === "SALES"),
+  );
 
   // Inject pending badge on Stock Approvals
   visibleItems = visibleItems.map((item) => {
