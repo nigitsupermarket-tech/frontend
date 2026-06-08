@@ -1,11 +1,29 @@
 "use client";
 import { useState, useRef } from "react";
-import { Download, Upload, FileText, FileSpreadsheet, X, AlertCircle, CheckCircle, Printer } from "lucide-react";
+import {
+  Download,
+  Upload,
+  FileText,
+  FileSpreadsheet,
+  X,
+  AlertCircle,
+  CheckCircle,
+  Printer,
+  Clock,
+  ShieldAlert,
+} from "lucide-react";
 import { apiGet, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
-import { formatPrice } from "@/lib/utils";
+import { useAuthStore } from "@/store/authStore";
 
-interface ImportResult { success: number; failed: number; errors: Array<{ row: number; error: string; data: any }>; }
+interface ImportResult {
+  success: number;
+  failed: number;
+  errors: Array<{ row: number; error: string; data: any }>;
+  // Non-admin fields
+  stockRequests?: number;
+  stockRequestsFailed?: number;
+}
 
 // ── Helper: trigger a file download from a fetch response ────────────────────
 async function downloadBlob(url: string, filename: string, token: string) {
@@ -27,12 +45,22 @@ async function downloadBlob(url: string, filename: string, token: string) {
   document.body.removeChild(a);
 }
 
-export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
+export function ImportExportModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<"export" | "import">("export");
   const [isLoading, setIsLoading] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
 
   if (!isOpen) return null;
 
@@ -51,11 +79,9 @@ export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: bool
   const handleExportPDF = async () => {
     try {
       setIsLoading(true);
-      // Try the backend PDF endpoint first (requires pdfkit: run `npm install` in backend)
       await downloadBlob(`${API_URL}/export/products/pdf`, `products-${Date.now()}.pdf`, token);
       toast("Products exported as PDF", "success");
     } catch (error: any) {
-      // If backend PDF fails (pdfkit not installed), fall back to browser print
       const msg: string = error?.message || "";
       if (msg.includes("500") || msg.includes("failed")) {
         toast("Generating print-friendly PDF…", "default");
@@ -66,7 +92,6 @@ export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: bool
     } finally { setIsLoading(false); }
   };
 
-  // Client-side print fallback — fetches products and opens a printable window
   const handlePrintFallback = async () => {
     try {
       const res = await apiGet<any>("/products?status=ACTIVE&limit=500");
@@ -131,7 +156,18 @@ export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: bool
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Import failed");
       setImportResult(data.data);
-      if (data.data.success > 0) { toast(`${data.data.success} products imported`, "success"); onSuccess(); }
+
+      // Toast message depends on role
+      if (!isAdmin && (data.data.stockRequests ?? 0) > 0) {
+        toast(
+          `${data.data.stockRequests} stock change(s) submitted for admin approval`,
+          "success",
+        );
+        if (data.data.success > 0) onSuccess();
+      } else if (data.data.success > 0) {
+        toast(`${data.data.success} products imported`, "success");
+        onSuccess();
+      }
     } catch (error) { toast(getApiError(error), "error"); }
     finally { setIsLoading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   };
@@ -173,7 +209,7 @@ export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: bool
                   <FileText className="w-8 h-8 text-red-500 shrink-0" />
                   <div className="text-left">
                     <p className="font-semibold text-sm text-gray-900">Export as PDF</p>
-                    <p className="text-xs text-gray-500">Printable inventory report (opens print dialog if server PDF fails)</p>
+                    <p className="text-xs text-gray-500">Printable inventory report</p>
                   </div>
                   <Printer className="w-4 h-4 text-gray-400 ml-auto" />
                 </button>
@@ -184,29 +220,91 @@ export function ImportExportModal({ isOpen, onClose, onSuccess }: { isOpen: bool
 
           {activeTab === "import" && (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex gap-2 text-xs text-blue-700">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>Use the CSV template to ensure correct formatting. Existing products with matching SKUs will be updated.</span>
-              </div>
-              <button onClick={handleDownloadTemplate} className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600 hover:border-green-400 hover:text-green-700">
+              {/* Role-specific notice */}
+              {!isAdmin ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex gap-2 text-xs text-amber-800">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">Approval required for stock changes</p>
+                    <p>
+                      Any <strong>stockQuantity</strong> values in your CSV will be submitted
+                      as pending requests for admin approval — they will not update immediately.
+                      Other product fields (price, name, etc.) will update normally.
+                    </p>
+                    <p className="text-amber-600">
+                      You cannot create new products via CSV — only update existing ones by SKU.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex gap-2 text-xs text-blue-700">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>Use the CSV template to ensure correct formatting. Existing products with matching SKUs will be updated.</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleDownloadTemplate}
+                className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600 hover:border-green-400 hover:text-green-700"
+              >
                 <Download className="w-4 h-4" /> Download CSV Template
               </button>
+
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-2">Upload CSV File</label>
-                <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImport}
+                <label className="block text-xs font-medium text-gray-700 mb-2">
+                  Upload CSV File
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  onChange={handleImport}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-green-50 file:text-green-700 file:font-medium file:text-xs hover:file:bg-green-100"
                 />
               </div>
-              {isLoading && <p className="text-xs text-center text-gray-500 animate-pulse">Importing products…</p>}
+
+              {isLoading && (
+                <p className="text-xs text-center text-gray-500 animate-pulse">
+                  {isAdmin ? "Importing products…" : "Processing CSV…"}
+                </p>
+              )}
+
+              {/* Result display */}
               {importResult && (
                 <div className="space-y-2">
-                  <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${importResult.success > 0 ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-600"}`}>
-                    <CheckCircle className="w-4 h-4" />
-                    <span>{importResult.success} products imported successfully</span>
-                  </div>
-                  {importResult.failed > 0 && (
+                  {/* Non-admin: stock requests block */}
+                  {!isAdmin && (importResult.stockRequests ?? 0) > 0 && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                      <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                      <div>
+                        <p className="font-semibold">
+                          {importResult.stockRequests} stock change{importResult.stockRequests !== 1 ? "s" : ""} pending approval
+                        </p>
+                        <p className="text-xs mt-0.5 text-amber-600">
+                          An admin will review and approve these in the Stock Approvals section.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Other fields updated */}
+                  {importResult.success > 0 && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-green-50 border border-green-200 text-sm text-green-700">
+                      <CheckCircle className="w-4 h-4 shrink-0" />
+                      <span>
+                        {isAdmin
+                          ? `${importResult.success} product(s) imported successfully`
+                          : `${importResult.success} product(s) updated (non-stock fields)`}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Errors */}
+                  {(importResult.failed > 0 || (importResult.stockRequestsFailed ?? 0) > 0) && (
                     <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                      <p className="text-xs font-semibold text-red-700 mb-2">{importResult.failed} failed:</p>
+                      <p className="text-xs font-semibold text-red-700 mb-2">
+                        {(importResult.failed + (importResult.stockRequestsFailed ?? 0))} row(s) had errors:
+                      </p>
                       <div className="space-y-1 max-h-32 overflow-y-auto">
                         {importResult.errors.slice(0, 10).map((e, i) => (
                           <p key={i} className="text-xs text-red-600">Row {e.row}: {e.error}</p>
