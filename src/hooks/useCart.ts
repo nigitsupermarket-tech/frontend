@@ -7,20 +7,21 @@ import { getApiError } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 
 interface ProductMeta {
-  price: number;
+  price: number; // pricePerUnit for scalable, product.price for fixed
   name: string;
   image?: string;
   sku?: string;
   stockQuantity?: number;
+  // scalable metadata — must be passed for scalable products
+  isScalable?: boolean;
   scaleUnit?: string;
-  scaleQty?: number;
+  scaleStep?: number;
+  minOrderQty?: number;
+  maxOrderQty?: number;
 }
 
-// Map raw API error messages to user-friendly equivalents
 function friendlyCartError(error: unknown): string {
   const msg = getApiError(error);
-
-  // Already user-friendly messages from our backend — pass through
   if (
     msg.includes("out of stock") ||
     msg.includes("available") ||
@@ -30,8 +31,6 @@ function friendlyCartError(error: unknown): string {
   ) {
     return msg;
   }
-
-  // Network / timeout
   if (
     msg.toLowerCase().includes("timeout") ||
     msg.toLowerCase().includes("network") ||
@@ -39,9 +38,6 @@ function friendlyCartError(error: unknown): string {
   ) {
     return "Connection issue — please try again";
   }
-
-  // Cart conflict (the "c already exists" type errors are now caught server-side
-  // but handle any that slip through)
   if (
     msg.toLowerCase().includes("conflict") ||
     msg.toLowerCase().includes("already exists") ||
@@ -49,8 +45,6 @@ function friendlyCartError(error: unknown): string {
   ) {
     return "Cart sync issue — please refresh the page";
   }
-
-  // Generic fallback
   return msg || "Could not update cart — please try again";
 }
 
@@ -75,6 +69,12 @@ export function useCart() {
               image: meta.image || "",
               sku: meta.sku,
               stockQuantity: meta.stockQuantity,
+              // Pass scalable metadata through so drawer/cart page renders correctly
+              isScalable: meta.isScalable,
+              scaleUnit: meta.scaleUnit,
+              scaleStep: meta.scaleStep,
+              minOrderQty: meta.minOrderQty,
+              maxOrderQty: meta.maxOrderQty,
             }
           : undefined,
       );
@@ -85,12 +85,12 @@ export function useCart() {
   };
 
   const updateQuantity = async (itemId: string, quantity: number) => {
-    if (quantity < 1) return;
+    // Allow float quantities for scalable products — only skip true removal (< minQty handled upstream)
+    if (quantity <= 0) return;
     try {
       await store.updateItem(itemId, quantity);
     } catch (error) {
       const msg = getApiError(error);
-      // 404 on update = stale item ID, trigger a re-fetch silently
       if (msg.includes("not found") || msg.includes("404")) {
         await store.fetchCart().catch(() => {});
       } else {
@@ -106,7 +106,6 @@ export function useCart() {
     } catch (error) {
       const msg = getApiError(error);
       if (msg.includes("not found") || msg.includes("404")) {
-        // Item already gone — silently re-fetch to sync state
         await store.fetchCart().catch(() => {});
       } else {
         toast(friendlyCartError(error), "error");
@@ -122,7 +121,7 @@ export function useCart() {
     }
   };
 
-  // Derive display items — for guest show guestItems, for auth show items
+  // Derive display items — guest uses local GuestCartItem, auth uses server CartItem
   const displayItems = isAuthenticated
     ? store.items
     : store.guestItems.map((g) => ({
@@ -131,12 +130,24 @@ export function useCart() {
         productId: g.productId,
         quantity: g.quantity,
         price: g.price,
+        // Expose scalable fields directly on item (for guest path)
+        isScalable: g.isScalable,
+        scaleUnit: g.scaleUnit,
+        scaleStep: g.scaleStep,
+        minOrderQty: g.minOrderQty,
+        maxOrderQty: g.maxOrderQty,
         product: {
           id: g.productId,
           name: g.name,
           slug: "",
           images: g.image ? [g.image] : [],
           price: g.price,
+          pricePerUnit: g.isScalable ? g.price : undefined,
+          isScalable: g.isScalable,
+          scaleUnit: g.scaleUnit,
+          scaleStep: g.scaleStep,
+          minOrderQty: g.minOrderQty,
+          maxOrderQty: g.maxOrderQty,
           stockQuantity: g.stockQuantity,
           status: "ACTIVE" as const,
           sku: g.sku || "",

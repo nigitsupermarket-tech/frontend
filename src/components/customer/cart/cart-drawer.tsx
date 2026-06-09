@@ -14,6 +14,7 @@ import {
   LogIn,
   UserPlus,
   ShoppingCart,
+  Scale,
 } from "lucide-react";
 import { useCart } from "@/hooks/useCart";
 import { useAuthStore } from "@/store/authStore";
@@ -25,7 +26,7 @@ import {
 } from "@/components/shared/loading-spinner";
 import Image from "next/image";
 
-// ─── Auth required modal (shown when guest clicks Checkout) ──────────────────
+// ─── Auth required modal ──────────────────────────────────────────────────────
 function AuthRequiredModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { closeCart } = useCart();
@@ -39,7 +40,6 @@ function AuthRequiredModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-        {/* Header */}
         <div className="px-6 pt-6 pb-4 text-center relative">
           <button
             onClick={onClose}
@@ -56,9 +56,7 @@ function AuthRequiredModal({ onClose }: { onClose: () => void }) {
             will be saved automatically.
           </p>
         </div>
-
         <div className="px-6 pb-6 space-y-3">
-          {/* Sign in */}
           <button
             onClick={() => go("/login?redirect=/checkout")}
             className="w-full flex items-center justify-center gap-2 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors"
@@ -66,8 +64,6 @@ function AuthRequiredModal({ onClose }: { onClose: () => void }) {
             <LogIn className="w-4 h-4" />
             Sign In to Checkout
           </button>
-
-          {/* Create account */}
           <button
             onClick={() => go("/register?redirect=/checkout")}
             className="w-full flex items-center justify-center gap-2 py-3 border-2 border-green-600 text-green-700 font-semibold rounded-xl hover:bg-green-50 transition-colors"
@@ -75,7 +71,6 @@ function AuthRequiredModal({ onClose }: { onClose: () => void }) {
             <UserPlus className="w-4 h-4" />
             Create Account
           </button>
-
           <p className="text-center text-xs text-gray-400 pt-1">
             Your cart items will be waiting for you after sign in
           </p>
@@ -83,6 +78,43 @@ function AuthRequiredModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function getScaleUnit(item: any): string | undefined {
+  // For server-side CartItem, check product.scaleUnit
+  // For guest GuestCartItem, check item.scaleUnit directly
+  return item.product?.isScalable
+    ? item.product.scaleUnit
+    : item.isScalable
+      ? item.scaleUnit
+      : undefined;
+}
+
+function getIsScalable(item: any): boolean {
+  return !!(item.product?.isScalable ?? item.isScalable);
+}
+
+function getScaleStep(item: any): number {
+  return item.product?.scaleStep ?? item.scaleStep ?? 0.1;
+}
+
+function getMinQty(item: any): number {
+  return item.product?.minOrderQty ?? item.minOrderQty ?? getScaleStep(item);
+}
+
+function getMaxQty(item: any): number {
+  const stockQty =
+    item.product?.stockQuantity ?? item.stockQuantity ?? Infinity;
+  const maxOrderQty = item.product?.maxOrderQty ?? item.maxOrderQty;
+  if (maxOrderQty) return Math.min(maxOrderQty, stockQty);
+  return stockQty;
+}
+
+function formatQty(qty: number, unit?: string): string {
+  const rounded =
+    qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
+  return unit ? `${rounded} ${unit}` : rounded;
 }
 
 // ─── Cart Drawer ──────────────────────────────────────────────────────────────
@@ -102,16 +134,16 @@ export function CartDrawer() {
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const handleCheckoutClick = () => {
-    if (!isAuthenticated) {
-      // Show auth modal instead of navigating
-      setShowAuthModal(true);
-    }
-    // If authenticated, the Link handles navigation normally
+    if (!isAuthenticated) setShowAuthModal(true);
   };
+
+  // Displayed item count: for scalable items show weight/vol, otherwise round
+  const displayCount = items.reduce((s, i) => {
+    return getIsScalable(i) ? s + 1 : s + (i.quantity as number);
+  }, 0);
 
   return (
     <>
-      {/* Auth modal */}
       {showAuthModal && (
         <AuthRequiredModal onClose={() => setShowAuthModal(false)} />
       )}
@@ -133,9 +165,9 @@ export function CartDrawer() {
             <ShoppingBag className="w-5 h-5 text-brand-600" />
             <h2 className="font-semibold text-gray-900">
               Shopping Cart
-              {itemCount > 0 && (
+              {items.length > 0 && (
                 <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({itemCount} {itemCount === 1 ? "item" : "items"})
+                  ({items.length} {items.length === 1 ? "item" : "items"})
                 </span>
               )}
             </h2>
@@ -177,99 +209,134 @@ export function CartDrawer() {
             />
           ) : (
             <ul className="space-y-4">
-              {items.map((item) => (
-                <li key={item.id} className="flex gap-3">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 border border-gray-100 shrink-0">
-                    <Image
-                      src={getProductImage(item.product.images)}
-                      alt={item.product.name}
-                      width={64}
-                      height={64}
-                      className="w-full h-full object-contain p-1"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
-                      {item.product.name}
-                    </p>
-                    {item.product.sku && (
-                      <p className="text-xs text-gray-400 font-mono mt-0.5">
-                        {item.product.sku}
+              {items.map((item: any) => {
+                const isScalable = getIsScalable(item);
+                const unit = getScaleUnit(item);
+                const step = getScaleStep(item);
+                const minQty = getMinQty(item);
+                const maxQty = getMaxQty(item);
+                const itemId = isGuest ? item.productId : item.id;
+
+                const handleDecrement = () => {
+                  if (isScalable) {
+                    const next = parseFloat(
+                      (
+                        Math.round((item.quantity - step) / step) * step
+                      ).toFixed(10),
+                    );
+                    if (next < minQty) {
+                      removeFromCart(itemId);
+                    } else {
+                      updateQuantity(itemId, next);
+                    }
+                  } else {
+                    updateQuantity(itemId, item.quantity - 1);
+                  }
+                };
+
+                const handleIncrement = () => {
+                  if (isScalable) {
+                    const next = parseFloat(
+                      (
+                        Math.round((item.quantity + step) / step) * step
+                      ).toFixed(10),
+                    );
+                    if (next > maxQty) return;
+                    updateQuantity(itemId, next);
+                  } else {
+                    updateQuantity(itemId, item.quantity + 1);
+                  }
+                };
+
+                const atMin = isScalable
+                  ? item.quantity <= minQty
+                  : item.quantity <= 1;
+                const atMax = item.quantity >= maxQty;
+                const lineTotal = item.price * item.quantity;
+
+                return (
+                  <li key={item.id ?? item.productId} className="flex gap-3">
+                    <div className="w-16 h-16 rounded-xl overflow-hidden bg-gray-50 border border-gray-100 shrink-0">
+                      <Image
+                        src={getProductImage(item.product?.images ?? [])}
+                        alt={item.product?.name ?? item.name ?? ""}
+                        width={64}
+                        height={64}
+                        className="w-full h-full object-contain p-1"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 line-clamp-2 leading-snug">
+                        {item.product?.name ?? item.name}
                       </p>
-                    )}
-                    {/* Show unit label for scalable products */}
-                    {(item as any).scaleUnit && (
-                      <p className="text-xs text-green-700 font-semibold mt-0.5">
-                        {(item as any).scaleQty ?? item.quantity} {(item as any).scaleUnit}
-                      </p>
-                    )}
-                    <p className="mt-1 text-sm font-semibold text-brand-700">
-                      {formatPrice(item.price)}
-                      {(item as any).scaleUnit && (
-                        <span className="text-xs text-gray-400 font-normal ml-1">
-                          per {(item as any).scaleUnit}
-                        </span>
+                      {(item.product?.sku ?? item.sku) && (
+                        <p className="text-xs text-gray-400 font-mono mt-0.5">
+                          {item.product?.sku ?? item.sku}
+                        </p>
                       )}
-                    </p>
-                    <div className="flex items-center justify-between mt-2.5">
-                      {/* Quantity stepper */}
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
-                          <button
-                            onClick={() =>
-                              updateQuantity(
-                                isGuest ? item.productId : item.id,
-                                item.quantity - 1,
-                              )
-                            }
-                            disabled={item.quantity <= 1 || isLoading}
-                            className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="w-8 text-center text-sm font-semibold text-gray-900 select-none">
-                            {item.quantity}
+
+                      {/* Scalable badge + unit price */}
+                      {isScalable && unit ? (
+                        <p className="text-xs text-green-700 font-semibold mt-0.5 flex items-center gap-1">
+                          <Scale className="w-3 h-3" />
+                          {formatPrice(item.price)}/{unit}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-sm font-semibold text-brand-700">
+                          {formatPrice(item.price)}
+                        </p>
+                      )}
+
+                      <div className="flex items-center justify-between mt-2.5">
+                        {/* Quantity / amount stepper */}
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
+                            <button
+                              onClick={handleDecrement}
+                              disabled={atMin || isLoading}
+                              className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span
+                              className={`text-center text-sm font-semibold text-gray-900 select-none ${isScalable ? "w-20 px-1" : "w-8"}`}
+                            >
+                              {formatQty(item.quantity, unit)}
+                            </span>
+                            <button
+                              onClick={handleIncrement}
+                              disabled={atMax || isLoading}
+                              className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                          {atMax && (
+                            <p className="text-[10px] text-orange-500 font-medium leading-tight text-center">
+                              {isScalable
+                                ? `Max: ${formatQty(maxQty, unit)}`
+                                : `Max stock (${maxQty}) reached`}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-gray-900">
+                            {formatPrice(lineTotal)}
                           </span>
                           <button
-                            onClick={() =>
-                              updateQuantity(
-                                isGuest ? item.productId : item.id,
-                                item.quantity + 1,
-                              )
-                            }
-                            disabled={
-                              item.quantity >= item.product.stockQuantity ||
-                              isLoading
-                            }
-                            className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                            onClick={() => removeFromCart(itemId)}
+                            disabled={isLoading}
+                            className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
                           >
-                            <Plus className="w-3 h-3" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
-                        {item.quantity >= item.product.stockQuantity && (
-                          <p className="text-[10px] text-red-500 font-medium leading-tight text-center">
-                            Max stock ({item.product.stockQuantity}) reached
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold text-gray-900">
-                          {formatPrice(item.price * item.quantity)}
-                        </span>
-                        <button
-                          onClick={() =>
-                            removeFromCart(isGuest ? item.productId : item.id)
-                          }
-                          disabled={isLoading}
-                          className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -279,7 +346,8 @@ export function CartDrawer() {
           <div className="border-t border-gray-100 px-5 py-5 space-y-4 bg-white">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">
-                Subtotal ({itemCount} {itemCount === 1 ? "item" : "items"})
+                Subtotal ({items.length} {items.length === 1 ? "item" : "items"}
+                )
               </span>
               <span className="font-bold text-gray-900 text-base">
                 {formatPrice(subtotal)}
@@ -289,7 +357,6 @@ export function CartDrawer() {
               Shipping and taxes calculated at checkout
             </p>
 
-            {/* Checkout button — different behaviour for guest vs auth */}
             {isAuthenticated ? (
               <Link
                 href="/checkout"

@@ -62,8 +62,8 @@ interface Product {
 }
 interface CartItem {
   product: Product;
-  quantity: number;   // for scalable: this is the float amount (e.g. 1.5 for 1.5kg)
-  unitPrice: number;  // for scalable: pricePerUnit; for fixed: product.price
+  quantity: number; // for scalable: this is the float amount (e.g. 1.5 for 1.5kg)
+  unitPrice: number; // for scalable: pricePerUnit; for fixed: product.price
   discount: number;
 }
 interface Discount {
@@ -338,7 +338,10 @@ function CartItemRow({
   const handleDecrement = () => {
     if (isScalable) {
       const next = roundStep(item.quantity - step);
-      if (next < minQty) { onRemove(); return; }
+      if (next < minQty) {
+        onRemove();
+        return;
+      }
       onQtyChange(next);
     } else {
       onQtyChange(item.quantity - 1);
@@ -358,7 +361,8 @@ function CartItemRow({
   const atMin = isScalable ? item.quantity <= minQty : item.quantity <= 1;
   const atMax = isScalable
     ? item.quantity >= maxQty
-    : item.product.trackInventory && item.quantity >= (item.product.stockQuantity ?? Infinity);
+    : item.product.trackInventory &&
+      item.quantity >= (item.product.stockQuantity ?? Infinity);
 
   const qtyDisplay = isScalable
     ? item.quantity % 1 === 0
@@ -408,7 +412,8 @@ function CartItemRow({
                       : "border-gray-300 text-gray-600 hover:border-green-500"
                   }`}
                 >
-                  {p}{unit}
+                  {p}
+                  {unit}
                 </button>
               ))}
             </div>
@@ -421,14 +426,20 @@ function CartItemRow({
             >
               <Minus className="w-2.5 h-2.5" />
             </button>
-            <span className={`text-center text-xs font-bold ${isScalable ? "w-14 px-1" : "w-7"}`}>
+            <span
+              className={`text-center text-xs font-bold ${isScalable ? "w-14 px-1" : "w-7"}`}
+            >
               {qtyDisplay}
             </span>
             <button
               onClick={handleIncrement}
               disabled={atMax}
               className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-              title={atMax ? `Max ${isScalable ? `${maxQty} ${unit}` : `stock (${item.product.stockQuantity})`} reached` : undefined}
+              title={
+                atMax
+                  ? `Max ${isScalable ? `${maxQty} ${unit}` : `stock (${item.product.stockQuantity})`} reached`
+                  : undefined
+              }
             >
               <Plus className="w-2.5 h-2.5" />
             </button>
@@ -472,7 +483,6 @@ function CartItemRow({
     </div>
   );
 }
-
 
 // ── POSProductGrid ─────────────────────────────────────────────────────────────
 // ✅ FIX 3: Touch-friendly visual product grid for busy POS environments.
@@ -580,8 +590,10 @@ function POSProductGrid({
 
                   {/* Cart quantity badge */}
                   {inCart && (
-                    <span className="absolute top-1.5 right-1.5 bg-green-600 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow">
-                      {inCart.quantity}
+                    <span className="absolute top-1.5 right-1.5 bg-green-600 text-white text-[10px] font-bold min-w-5 h-5 px-1 rounded-full flex items-center justify-center shadow leading-none">
+                      {product.isScalable
+                        ? `${inCart.quantity % 1 === 0 ? inCart.quantity.toFixed(0) : inCart.quantity.toFixed(1)}${product.scaleUnit ? product.scaleUnit[0] : ""}`
+                        : inCart.quantity}
                     </span>
                   )}
 
@@ -589,6 +601,13 @@ function POSProductGrid({
                   {outOfStock && (
                     <span className="absolute top-1.5 left-1.5 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
                       Out
+                    </span>
+                  )}
+
+                  {/* Scalable badge */}
+                  {!outOfStock && product.isScalable && (
+                    <span className="absolute top-1.5 left-1.5 bg-green-700 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                      ⚖ {product.scaleUnit || "unit"}
                     </span>
                   )}
 
@@ -603,7 +622,9 @@ function POSProductGrid({
                         : formatPrice(product.price)}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      Qty: {product.stockQuantity}
+                      {product.isScalable
+                        ? `${product.stockQuantity} ${product.scaleUnit || "unit"} left`
+                        : `Qty: ${product.stockQuantity}`}
                     </p>
                   </div>
                 </button>
@@ -843,11 +864,10 @@ export default function POSPage() {
 
   const addToCart = (product: Product) => {
     const isScalable = !!product.isScalable;
-    const unitPrice = isScalable && product.pricePerUnit
-      ? product.pricePerUnit
-      : product.price;
+    const unitPrice =
+      isScalable && product.pricePerUnit ? product.pricePerUnit : product.price;
     const startQty = isScalable
-      ? (product.minOrderQty || product.scaleStep || 0.1)
+      ? product.minOrderQty || product.scaleStep || 0.1
       : 1;
 
     setCart((prev) => {
@@ -856,31 +876,43 @@ export default function POSPage() {
         if (isScalable) {
           const step = product.scaleStep || 0.1;
           const maxQty = product.maxOrderQty
-            ? Math.min(product.maxOrderQty, product.trackInventory ? product.stockQuantity : Infinity)
-            : (product.trackInventory ? product.stockQuantity : Infinity);
-          const next = parseFloat((Math.round((existing.quantity + step) / step) * step).toFixed(10));
+            ? Math.min(
+                product.maxOrderQty,
+                product.trackInventory ? product.stockQuantity : Infinity,
+              )
+            : product.trackInventory
+              ? product.stockQuantity
+              : Infinity;
+          const next = parseFloat(
+            (Math.round((existing.quantity + step) / step) * step).toFixed(10),
+          );
           if (next > maxQty) return prev;
           return prev.map((i) =>
             i.product.id === product.id ? { ...i, quantity: next } : i,
           );
         } else {
-          const maxQty = product.trackInventory ? (product.stockQuantity ?? Infinity) : Infinity;
+          const maxQty = product.trackInventory
+            ? (product.stockQuantity ?? Infinity)
+            : Infinity;
           if (existing.quantity >= maxQty) return prev;
           return prev.map((i) =>
-            i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i,
+            i.product.id === product.id
+              ? { ...i, quantity: i.quantity + 1 }
+              : i,
           );
         }
       }
-      return [
-        ...prev,
-        { product, quantity: startQty, unitPrice, discount: 0 },
-      ];
+      return [...prev, { product, quantity: startQty, unitPrice, discount: 0 }];
     });
 
     // Warn if at stock limit (fixed products)
     if (!isScalable) {
       const inCart = cart.find((i) => i.product.id === product.id);
-      if (inCart && product.trackInventory && inCart.quantity >= (product.stockQuantity ?? Infinity)) {
+      if (
+        inCart &&
+        product.trackInventory &&
+        inCart.quantity >= (product.stockQuantity ?? Infinity)
+      ) {
         toast(`Stock limit reached for ${product.name}`, "error");
       }
     }
@@ -943,6 +975,65 @@ export default function POSPage() {
     }
   };
 
+  // ── Print receipt from checkout modal using iframe (avoids printing full page) ──
+  const printCurrentReceipt = () => {
+    const el = document.getElementById("receipt-content");
+    if (!el) return;
+
+    const existing = document.getElementById("pos-receipt-print-frame");
+    if (existing) existing.remove();
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "pos-receipt-print-frame";
+    iframe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:297mm;border:none;";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html><html><head>
+      <style>
+        @page { size: 80mm auto; margin: 0; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 11px;
+               width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.4; }
+        .text-center, .center { text-align: center; }
+        .font-bold, .bold, b, strong { font-weight: bold; }
+        .text-gray-400, .text-gray-500, .text-gray-600 { color: #555; }
+        .border-t { border-top: 1px dashed #000; margin: 3mm 0; }
+        .border-dashed { border-style: dashed; }
+        .flex { display: flex; }
+        .justify-between { justify-content: space-between; }
+        .space-y-1 > * { margin-bottom: 1mm; }
+        .text-base { font-size: 13px; }
+        .text-2xl, .text-xl { font-size: 14px; }
+        .text-xs { font-size: 10px; }
+        .text-\\[10px\\] { font-size: 9px; }
+        .my-2, .mb-3, .mt-3 { margin: 2mm 0; }
+        .pt-1, .pt-2 { padding-top: 1mm; }
+      </style>
+      </head><body>${el.innerHTML}</body></html>
+    `);
+    doc.close();
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        const win = iframe.contentWindow;
+        if (!win) return;
+        win.focus();
+        win.addEventListener("afterprint", () => {
+          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        });
+        win.print();
+        setTimeout(() => {
+          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        }, 30_000);
+      }, 300);
+    };
+  };
+
   const processPayment = async () => {
     if (cart.length === 0) {
       toast("Cart is empty", "error");
@@ -973,6 +1064,9 @@ export default function POSPage() {
           productSku: item.product.sku,
           barcode: item.product.barcode,
           netWeight: item.product.netWeight,
+          scaleUnit: item.product.isScalable
+            ? (item.product.scaleUnit ?? null)
+            : null,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           subtotal: item.unitPrice * item.quantity * (1 - item.discount / 100),
@@ -1705,26 +1799,26 @@ export default function POSPage() {
                     ? `${formatPrice(item.unitPrice)}/${itemUnit}`
                     : formatPrice(item.unitPrice);
                   return (
-                  <div key={i}>
-                    <div className="flex justify-between">
-                      <span className="flex-1 pr-2 truncate">
-                        {item.product.name}
-                      </span>
+                    <div key={i}>
+                      <div className="flex justify-between">
+                        <span className="flex-1 pr-2 truncate">
+                          {item.product.name}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-gray-600">
+                        <span>
+                          {qtyLabel} × {priceLabel}
+                          {item.discount > 0 && ` (-${item.discount}%)`}
+                        </span>
+                        <span>
+                          {formatPrice(
+                            item.unitPrice *
+                              item.quantity *
+                              (1 - item.discount / 100),
+                          )}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-gray-600">
-                      <span>
-                        {qtyLabel} × {priceLabel}
-                        {item.discount > 0 && ` (-${item.discount}%)`}
-                      </span>
-                      <span>
-                        {formatPrice(
-                          item.unitPrice *
-                            item.quantity *
-                            (1 - item.discount / 100),
-                        )}
-                      </span>
-                    </div>
-                  </div>
                   );
                 })}
               </div>
@@ -1769,7 +1863,7 @@ export default function POSPage() {
             </div>
             <div className="p-4 border-t flex gap-3">
               <button
-                onClick={() => window.print()}
+                onClick={() => printCurrentReceipt()}
                 className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800"
               >
                 <Printer className="w-4 h-4" /> Print

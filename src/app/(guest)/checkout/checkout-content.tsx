@@ -94,6 +94,34 @@ function calculateTotalWeight(items: any[]): number {
   );
 }
 
+// ─── Scalable product helpers (shared across cart adjuster + review) ─────────
+function isItemScalable(item: any): boolean {
+  return !!(item.product?.isScalable ?? item.isScalable);
+}
+function itemUnit(item: any): string | undefined {
+  return item.product?.isScalable
+    ? item.product.scaleUnit
+    : item.isScalable
+      ? item.scaleUnit
+      : undefined;
+}
+function itemStep(item: any): number {
+  return item.product?.scaleStep ?? item.scaleStep ?? 0.1;
+}
+function itemMinQty(item: any): number {
+  return item.product?.minOrderQty ?? item.minOrderQty ?? itemStep(item);
+}
+function itemMaxQty(item: any): number {
+  const stock = item.product?.stockQuantity ?? item.stockQuantity ?? Infinity;
+  const max = item.product?.maxOrderQty ?? item.maxOrderQty;
+  return max ? Math.min(max, stock) : stock;
+}
+function fmtQty(qty: number, unit?: string): string {
+  const s =
+    qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
+  return unit ? `${s} ${unit}` : s;
+}
+
 // ─── Cart adjuster — shown in order summary sidebar on every step ─────────────
 function CartSummaryAdjuster() {
   const store = useCartStore();
@@ -103,7 +131,8 @@ function CartSummaryAdjuster() {
   if (items.length === 0) return null;
 
   const handleUpdate = async (item: any, qty: number) => {
-    if (qty < 1) return;
+    const minQty = itemMinQty(item);
+    if (qty < minQty) return;
     try {
       await store.updateItem(isAuthenticated ? item.id : item.productId, qty);
     } catch {
@@ -125,55 +154,98 @@ function CartSummaryAdjuster() {
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
         Your Items
       </p>
-      {items.map((item: any) => (
-        <div key={item.id} className="flex items-center gap-2">
-          <div className="w-9 h-9 bg-white rounded border overflow-hidden shrink-0">
-            {item.product?.images?.[0] && (
-              <Image
-                src={item.product.images[0]}
-                alt={item.product?.name || ""}
-                width={36}
-                height={36}
-                className="w-full h-full object-contain"
-              />
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-gray-900 line-clamp-1">
-              {item.product?.name}
+      {items.map((item: any) => {
+        const scalable = isItemScalable(item);
+        const unit = itemUnit(item);
+        const step = itemStep(item);
+        const minQty = itemMinQty(item);
+        const maxQty = itemMaxQty(item);
+
+        const handleDec = () => {
+          if (scalable) {
+            const next = parseFloat(
+              (Math.round((item.quantity - step) / step) * step).toFixed(10),
+            );
+            if (next >= minQty) handleUpdate(item, next);
+          } else {
+            handleUpdate(item, item.quantity - 1);
+          }
+        };
+        const handleInc = () => {
+          if (scalable) {
+            const next = parseFloat(
+              (Math.round((item.quantity + step) / step) * step).toFixed(10),
+            );
+            if (next <= maxQty) handleUpdate(item, next);
+          } else {
+            handleUpdate(item, item.quantity + 1);
+          }
+        };
+
+        const atMin = scalable ? item.quantity <= minQty : item.quantity <= 1;
+        const atMax = item.quantity >= maxQty;
+
+        return (
+          <div key={item.id} className="flex items-center gap-2">
+            <div className="w-9 h-9 bg-white rounded border overflow-hidden shrink-0">
+              {item.product?.images?.[0] && (
+                <Image
+                  src={item.product.images[0]}
+                  alt={item.product?.name || ""}
+                  width={36}
+                  height={36}
+                  className="w-full h-full object-contain"
+                />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-gray-900 line-clamp-1">
+                {item.product?.name}
+              </p>
+              {scalable && unit ? (
+                <p className="text-xs text-green-700 font-semibold flex items-center gap-0.5">
+                  <Scale className="w-2.5 h-2.5" />
+                  {formatPrice(item.price)}/{unit}
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  {formatPrice(item.price)}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
+              <button
+                onClick={handleDec}
+                disabled={atMin}
+                className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span
+                className={`text-center text-xs font-semibold ${scalable ? "w-16 px-0.5" : "w-6"}`}
+              >
+                {fmtQty(item.quantity, unit)}
+              </span>
+              <button
+                onClick={handleInc}
+                disabled={atMax}
+                className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+            <p className="text-xs font-bold w-14 text-right shrink-0">
+              {formatPrice(item.price * item.quantity)}
             </p>
-            <p className="text-xs text-gray-500">{formatPrice(item.price)}</p>
-          </div>
-          <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
             <button
-              onClick={() => handleUpdate(item, item.quantity - 1)}
-              disabled={item.quantity <= 1}
-              className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+              onClick={() => handleRemove(item)}
+              className="p-1 text-gray-300 hover:text-red-500 transition-colors"
             >
-              <Minus className="w-3 h-3" />
-            </button>
-            <span className="w-6 text-center text-xs font-semibold">
-              {item.quantity}
-            </span>
-            <button
-              onClick={() => handleUpdate(item, item.quantity + 1)}
-              disabled={item.quantity >= (item.product?.stockQuantity || 999)}
-              className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
-            >
-              <Plus className="w-3 h-3" />
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
-          <p className="text-xs font-bold w-14 text-right shrink-0">
-            {formatPrice(item.price * item.quantity)}
-          </p>
-          <button
-            onClick={() => handleRemove(item)}
-            className="p-1 text-gray-300 hover:text-red-500 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -540,6 +612,8 @@ export default function CheckoutPageContent() {
         items: items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
+          // price is already pricePerUnit for scalable, product.price for fixed
+          // (set correctly by cart.controller.ts when item was added)
           price: item.price,
         })),
         subtotal,
@@ -1008,35 +1082,47 @@ export default function CheckoutPageContent() {
                   Order
                 </h2>
                 <div className="space-y-3 mb-5">
-                  {items.map((item: any) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center gap-3 py-3 border-b border-gray-100"
-                    >
-                      <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                        {item.product?.images?.[0] && (
-                          <Image
-                            src={item.product.images[0]}
-                            alt={item.product?.name || ""}
-                            width={48}
-                            height={48}
-                            className="w-full h-full object-contain"
-                          />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900 line-clamp-1">
-                          {item.product?.name}
+                  {items.map((item: any) => {
+                    const scalable = isItemScalable(item);
+                    const unit = itemUnit(item);
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex items-center gap-3 py-3 border-b border-gray-100"
+                      >
+                        <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
+                          {item.product?.images?.[0] && (
+                            <Image
+                              src={item.product.images[0]}
+                              alt={item.product?.name || ""}
+                              width={48}
+                              height={48}
+                              className="w-full h-full object-contain"
+                            />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                            {item.product?.name}
+                          </p>
+                          {scalable && unit ? (
+                            <p className="text-xs text-green-700 flex items-center gap-1">
+                              <Scale className="w-3 h-3" />
+                              {fmtQty(item.quantity, unit)} ×{" "}
+                              {formatPrice(item.price)}/{unit}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-gray-500">
+                              Qty: {item.quantity}
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-sm font-bold text-gray-900">
+                          {formatPrice(item.price * item.quantity)}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          Qty: {item.quantity}
-                        </p>
                       </div>
-                      <p className="text-sm font-bold text-gray-900">
-                        {formatPrice(item.price * item.quantity)}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {selectedAddress && (
                   <div className="mb-3 p-3 bg-gray-50 rounded text-sm">

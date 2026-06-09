@@ -23,13 +23,17 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const unit = product.scaleUnit || "unit";
   const step = product.scaleStep || 0.1;
   const minQty = product.minOrderQty || step;
-  const maxQty = product.maxOrderQty || (product.trackInventory ? product.stockQuantity : 9999);
+  const maxQty =
+    product.maxOrderQty ||
+    (product.trackInventory ? product.stockQuantity : 9999);
   const presets = product.scalePresets?.length ? product.scalePresets : [];
 
   // For scalable: quantity is a float (kg, L, etc.). For fixed: integer.
   const [quantity, setQuantity] = useState(isScalable ? minQty : 1);
 
-  const roundStep = (val: number) => Math.round(val / step) * step;
+  // parseFloat + toFixed(10) avoids floating-point drift (e.g. 0.1+0.1+0.1 ≠ 0.3)
+  const roundStep = (val: number) =>
+    parseFloat((Math.round(val / step) * step).toFixed(10));
 
   const decrement = () => {
     if (isScalable) {
@@ -50,9 +54,10 @@ export function ProductCard({ product, className }: ProductCardProps) {
   };
 
   // Effective price shown — for scalable use pricePerUnit × qty, else product.price
-  const effectivePrice = isScalable && product.pricePerUnit
-    ? product.pricePerUnit * quantity
-    : product.price;
+  const effectivePrice =
+    isScalable && product.pricePerUnit
+      ? product.pricePerUnit * quantity
+      : product.price;
 
   const isOutOfStock =
     product.stockStatus === "OUT_OF_STOCK" || product.stockQuantity === 0;
@@ -67,15 +72,20 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const handleAdd = async () => {
     if (isOutOfStock) return;
     await addToCart(product.id, quantity, {
-      price: isScalable && product.pricePerUnit ? product.pricePerUnit : product.price,
+      price:
+        isScalable && product.pricePerUnit
+          ? product.pricePerUnit
+          : product.price,
       name: product.name,
       image: product.images?.[0] || "",
       sku: product.sku,
       stockQuantity: product.stockQuantity,
-      // Pass scale metadata for cart display
       ...(isScalable && {
+        isScalable: true,
         scaleUnit: unit,
-        scaleQty: quantity,
+        scaleStep: step,
+        minOrderQty: minQty,
+        maxOrderQty: product.maxOrderQty,
       }),
     });
     setAddedFeedback(true);
@@ -163,7 +173,6 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
         {/* Controls */}
         <div className="flex-1 flex flex-col gap-1.5 p-2 min-w-0">
-
           {/* Weight / units row */}
           <div className="flex items-start justify-between gap-1">
             <span className="text-[10px] sm:text-xs leading-tight">
@@ -179,7 +188,8 @@ export function ProductCard({ product, className }: ProductCardProps) {
                     {product.unitsPerCarton} units
                   </span>
                   <span className="text-gray-500">
-                    {" "}/ {product.netWeight || "carton"}
+                    {" "}
+                    / {product.netWeight || "carton"}
                   </span>
                 </>
               ) : product.netWeight ? (
@@ -223,7 +233,8 @@ export function ProductCard({ product, className }: ProductCardProps) {
                       : "border-gray-300 text-gray-600 hover:border-green-500",
                   )}
                 >
-                  {p}{unit}
+                  {p}
+                  {unit}
                 </button>
               ))}
             </div>
@@ -255,11 +266,18 @@ export function ProductCard({ product, className }: ProductCardProps) {
                 </button>
               </div>
             </div>
-            {!isScalable && product.trackInventory && quantity >= product.stockQuantity && (
-              <p className="text-[8px] sm:text-[9px] text-red-500 font-medium leading-tight">
-                Max stock reached ({product.stockQuantity} available)
+            {isScalable && product.trackInventory && quantity >= maxQty && (
+              <p className="text-[8px] sm:text-[9px] text-orange-500 font-medium leading-tight">
+                Max: {product.stockQuantity} {unit} available
               </p>
             )}
+            {!isScalable &&
+              product.trackInventory &&
+              quantity >= product.stockQuantity && (
+                <p className="text-[8px] sm:text-[9px] text-red-500 font-medium leading-tight">
+                  Max stock reached ({product.stockQuantity} available)
+                </p>
+              )}
           </div>
 
           {/* Price */}
@@ -267,11 +285,13 @@ export function ProductCard({ product, className }: ProductCardProps) {
             <span className="text-xs sm:text-sm font-bold text-gray-900">
               {formatPrice(effectivePrice)}
             </span>
-            {!isScalable && product.comparePrice && product.comparePrice > product.price && (
-              <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
-                {formatPrice(product.comparePrice)}
-              </span>
-            )}
+            {!isScalable &&
+              product.comparePrice &&
+              product.comparePrice > product.price && (
+                <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
+                  {formatPrice(product.comparePrice)}
+                </span>
+              )}
           </div>
 
           {/* CTA */}

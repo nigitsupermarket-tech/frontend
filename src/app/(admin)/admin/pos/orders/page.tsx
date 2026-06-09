@@ -1,9 +1,9 @@
 "use client";
 
 // frontend/src/app/(admin)/admin/pos/orders/page.tsx
-// POS orders history — search, filter, void, view receipt
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   Eye,
@@ -19,8 +19,7 @@ import {
 } from "lucide-react";
 import { apiGet, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
-import { formatPrice } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { formatPrice, cn } from "@/lib/utils";
 import Link from "next/link";
 
 interface POSOrderItem {
@@ -32,6 +31,7 @@ interface POSOrderItem {
   subtotal: number;
   discountApplied: number;
   netWeight?: string;
+  scaleUnit?: string; // present for scalable products
 }
 
 interface POSOrder {
@@ -48,7 +48,6 @@ interface POSOrder {
   customerName?: string;
   customerPhone?: string;
   createdAt: string;
-  completedAt?: string;
   items: POSOrderItem[];
   processedBy: { name: string; role: string };
 }
@@ -61,20 +60,131 @@ interface DayStats {
   transferSales: number;
 }
 
-const PAYMENT_ICONS = {
-  CASH: <Banknote className="w-3.5 h-3.5" />,
-  CARD: <CreditCard className="w-3.5 h-3.5" />,
-  TRANSFER: <ArrowRightLeft className="w-3.5 h-3.5" />,
-  SPLIT: <TrendingUp className="w-3.5 h-3.5" />,
-};
-
-const PAYMENT_COLORS = {
+const PM_COLORS: Record<string, string> = {
   CASH: "bg-green-100 text-green-700",
   CARD: "bg-blue-100 text-blue-700",
   TRANSFER: "bg-purple-100 text-purple-700",
   SPLIT: "bg-amber-100 text-amber-700",
 };
 
+// ── Receipt HTML builder ──────────────────────────────────────────────────────
+function buildReceiptHtml(order: POSOrder): string {
+  const itemsHtml = order.items
+    .map((item) => {
+      const qtyLabel = item.scaleUnit
+        ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
+        : String(item.quantity);
+      const priceLabel = item.scaleUnit
+        ? `&#8358;${item.unitPrice.toLocaleString()}/${item.scaleUnit}`
+        : `&#8358;${item.unitPrice.toLocaleString()}`;
+      return `
+    <tr>
+      <td style="padding:1mm 0;font-weight:bold;">${item.productName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:bold;">${qtyLabel}&times;${priceLabel}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:bold;">&#8358;${item.subtotal.toLocaleString()}</td>
+    </tr>
+  `;
+    })
+    .join("");
+
+  return `<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <style>
+      @page { size: 80mm auto; margin: 2mm 0; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
+             font-weight: bold; width: 76mm; margin: 0 auto; line-height: 1.5; }
+      .c { text-align: center; }
+      .r { text-align: right; }
+      hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
+      table { width: 100%; border-collapse: collapse; }
+      .total-row td { font-size: 15px; border-top: 1px dashed #000;
+                      padding-top: 2mm; font-weight: bold; }
+    </style>
+  </head><body>
+    <div class="c" style="font-size:15px;">NigitTriple Supermarket</div>
+    <div class="c">30, Abuloma Road (Bozgomero Estate)</div>
+    <div class="c">Port Harcourt · +234 916 977 6138</div>
+    <hr/>
+    <div class="c">${order.receiptNumber}</div>
+    <div class="c">${new Date(order.createdAt).toLocaleString("en-NG")}</div>
+    ${order.customerName ? `<div class="c">Customer: ${order.customerName}</div>` : ""}
+    <div class="c">Staff: ${order.processedBy?.name || "—"}</div>
+    <hr/>
+    <table>
+      <colgroup><col style="width:45%"/><col style="width:30%"/><col style="width:25%"/></colgroup>
+      <tbody>${itemsHtml}</tbody>
+    </table>
+    <hr/>
+    <table>
+      ${order.discountAmount > 0 ? `<tr><td>Discount</td><td class="r">-&#8358;${order.discountAmount.toLocaleString()}</td></tr>` : ""}
+      <tr class="total-row"><td>TOTAL</td><td class="r">&#8358;${order.total.toLocaleString()}</td></tr>
+      <tr><td>Payment</td><td class="r">${order.paymentMethod}</td></tr>
+      ${order.amountTendered ? `<tr><td>Tendered</td><td class="r">&#8358;${order.amountTendered.toLocaleString()}</td></tr>` : ""}
+      ${order.changeGiven && order.changeGiven > 0 ? `<tr><td>Change</td><td class="r">&#8358;${order.changeGiven.toLocaleString()}</td></tr>` : ""}
+    </table>
+    <hr/>
+    <div class="c" style="font-size:9px;color:#666;">Software by Calstins Ltd · calstins.com</div>
+  </body></html>`;
+}
+
+// ── Print via hidden iframe (no popup blocker issues) ────────────────────────
+function printViaIframe(html: string) {
+  // Remove any leftover frame from previous prints
+  try {
+    const old = document.getElementById("pos-print-frame");
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+  } catch (_) {
+    /* ignore */
+  }
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "pos-print-frame";
+  iframe.setAttribute(
+    "style",
+    "position:fixed;top:-9999px;left:-9999px;width:80mm;height:200mm;border:none;visibility:hidden;",
+  );
+  document.body.appendChild(iframe);
+
+  const safeRemove = () => {
+    try {
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    } catch (_) {
+      /* already removed by HMR or browser — ignore */
+    }
+  };
+
+  try {
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+    if (!doc) {
+      safeRemove();
+      return;
+    }
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          const win = iframe.contentWindow;
+          if (!win) return;
+          win.focus();
+          win.addEventListener("afterprint", safeRemove, { once: true });
+          win.print();
+        } catch (_) {
+          safeRemove();
+        }
+        // Hard fallback after 60s
+        setTimeout(safeRemove, 60_000);
+      }, 400);
+    };
+  } catch (_) {
+    safeRemove();
+  }
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
 export default function POSOrdersPage() {
   const toast = useToast();
   const [orders, setOrders] = useState<POSOrder[]>([]);
@@ -85,26 +195,25 @@ export default function POSOrdersPage() {
   });
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DayStats | null>(null);
-
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState(() => {
-    return new Date().toISOString().split("T")[0]; // today
-  });
+  const [dateFilter, setDateFilter] = useState(
+    () => new Date().toISOString().split("T")[0],
+  );
   const [page, setPage] = useState(1);
-
   const [selectedOrder, setSelectedOrder] = useState<POSOrder | null>(null);
-  const [showDetail, setShowDetail] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: "20",
-      });
+      const params = new URLSearchParams({ page: String(page), limit: "20" });
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (dateFilter) {
@@ -142,7 +251,7 @@ export default function POSOrdersPage() {
     try {
       await apiPut(`/pos/orders/${orderId}/void`, { reason: voidReason });
       toast("Order voided and stock restored", "success");
-      setShowDetail(false);
+      setSelectedOrder(null);
       setVoidReason("");
       fetchOrders();
     } catch (err) {
@@ -150,64 +259,6 @@ export default function POSOrdersPage() {
     } finally {
       setVoiding(false);
     }
-  };
-
-  const printReceipt = (order: POSOrder) => {
-    const win = window.open("", "_blank", "width=400,height=600");
-    if (!win) return;
-    win.document.write(`
-      <html>
-      <head>
-        <title>Receipt ${order.receiptNumber}</title>
-        <style>
-          body { font-family: monospace; font-size: 12px; max-width: 300px; margin: 0 auto; padding: 10px; }
-          .center { text-align: center; }
-          .bold { font-weight: bold; }
-          .divider { border-top: 1px dashed #000; margin: 8px 0; }
-          .row { display: flex; justify-content: space-between; margin: 2px 0; }
-          .large { font-size: 16px; }
-        </style>
-      </head>
-      <body>
-        <div class="center bold large">NigitTriple Supermarket</div>
-        <div class="center">30, Abuloma Road (Bozgomero Estate)</div>
-        <div class="center">Port Harcourt, Rivers State</div>
-        <div class="center">Tel: +234 916 977 6138</div>
-        <div class="divider"></div>
-        <div class="center">Receipt: ${order.receiptNumber}</div>
-        <div class="center">${new Date(order.createdAt).toLocaleString("en-NG")}</div>
-        ${order.customerName ? `<div class="center">Customer: ${order.customerName}</div>` : ""}
-        <div class="center">Staff: ${order.processedBy?.name || "—"}</div>
-        <div class="divider"></div>
-        ${order.items
-          .map(
-            (item) => `
-          <div>${item.productName}</div>
-          <div class="row">
-            <span>${item.quantity} x ₦${item.unitPrice.toLocaleString()}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</span>
-            <span>₦${item.subtotal.toLocaleString()}</span>
-          </div>
-        `,
-          )
-          .join("")}
-        <div class="divider"></div>
-        <div class="row"><span>Subtotal</span><span>₦${order.subtotal.toLocaleString()}</span></div>
-        ${order.discountAmount > 0 ? `<div class="row"><span>Discount</span><span>-₦${order.discountAmount.toLocaleString()}</span></div>` : ""}
-        <div class="row bold large"><span>TOTAL</span><span>₦${order.total.toLocaleString()}</span></div>
-        <div class="row"><span>Payment: ${order.paymentMethod}</span></div>
-        ${order.amountTendered ? `<div class="row"><span>Tendered</span><span>₦${order.amountTendered.toLocaleString()}</span></div>` : ""}
-        ${order.changeGiven && order.changeGiven > 0 ? `<div class="row bold"><span>CHANGE</span><span>₦${order.changeGiven.toLocaleString()}</span></div>` : ""}
-        <div class="divider"></div>
-        <div class="center">Thank you for shopping!</div>
-        <div class="center">Goods sold are not returnable</div>
-        <div class="center">without receipt within 7 days</div>
-        <div class="divider"></div>
-        <div class="center" style="font-size:10px;color:#999;">Software by Calstins Ltd &middot; calstins.com</div>
-      </body>
-      </html>
-    `);
-    win.document.close();
-    win.print();
   };
 
   return (
@@ -223,8 +274,7 @@ export default function POSOrdersPage() {
             href="/admin/pos"
             className="flex items-center gap-2 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-gray-900 font-bold rounded-lg text-sm"
           >
-            <Monitor className="w-4 h-4" />
-            Open POS
+            <Monitor className="w-4 h-4" /> Open POS
           </Link>
           <button
             onClick={fetchOrders}
@@ -235,7 +285,7 @@ export default function POSOrdersPage() {
         </div>
       </div>
 
-      {/* Day stats */}
+      {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
@@ -288,14 +338,12 @@ export default function POSOrdersPage() {
             className="w-full pl-9 pr-4 py-2 border border-gray-300 text-sm focus:outline-none focus:border-green-500 rounded"
           />
         </div>
-
         <input
           type="date"
           value={dateFilter}
           onChange={(e) => setDateFilter(e.target.value)}
           className="border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded"
         />
-
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -307,7 +355,7 @@ export default function POSOrdersPage() {
         </select>
       </div>
 
-      {/* Orders table */}
+      {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-16">
@@ -315,7 +363,7 @@ export default function POSOrdersPage() {
           </div>
         ) : orders.length === 0 ? (
           <div className="text-center py-16 text-gray-500 text-sm">
-            No POS orders found for the selected filters.
+            No POS orders found.
           </div>
         ) : (
           <>
@@ -379,11 +427,10 @@ export default function POSOrdersPage() {
                         <span
                           className={cn(
                             "inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold",
-                            PAYMENT_COLORS[order.paymentMethod] ||
+                            PM_COLORS[order.paymentMethod] ||
                               "bg-gray-100 text-gray-700",
                           )}
                         >
-                          {PAYMENT_ICONS[order.paymentMethod]}
                           {order.paymentMethod}
                         </span>
                       </td>
@@ -410,17 +457,16 @@ export default function POSOrdersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => {
-                              setSelectedOrder(order);
-                              setShowDetail(true);
-                            }}
+                            onClick={() => setSelectedOrder(order)}
                             className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                             title="View details"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => printReceipt(order)}
+                            onClick={() =>
+                              printViaIframe(buildReceiptHtml(order))
+                            }
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
                             title="Print receipt"
                           >
@@ -433,8 +479,6 @@ export default function POSOrdersPage() {
                 </tbody>
               </table>
             </div>
-
-            {/* Pagination */}
             {pagination.totalPages > 1 && (
               <div className="flex justify-between items-center px-4 py-3 border-t border-gray-200 bg-gray-50">
                 <span className="text-xs text-gray-500">
@@ -465,167 +509,189 @@ export default function POSOrdersPage() {
         )}
       </div>
 
-      {/* Order Detail Modal */}
-      {showDetail && selectedOrder && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b">
-              <div>
-                <h3 className="font-bold text-gray-900">
-                  {selectedOrder.posOrderNumber}
-                </h3>
-                <p className="text-xs text-gray-500 font-mono">
-                  Receipt: {selectedOrder.receiptNumber}
-                </p>
+      {/* Order Detail Modal via portal */}
+      {mounted &&
+        selectedOrder &&
+        createPortal(
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+            style={{ zIndex: 9999 }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelectedOrder(null);
+            }}
+          >
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b">
+                <div>
+                  <h3 className="font-bold text-gray-900">
+                    {selectedOrder.posOrderNumber}
+                  </h3>
+                  <p className="text-xs text-gray-500 font-mono">
+                    Receipt: {selectedOrder.receiptNumber}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedOrder(null)}
+                  className="p-1 text-gray-400 hover:text-gray-700"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={() => setShowDetail(false)}>
-                <XCircle className="w-5 h-5 text-gray-400 hover:text-gray-600" />
-              </button>
-            </div>
 
-            <div className="overflow-y-auto flex-1 p-5 space-y-4">
-              {/* Meta */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="bg-gray-50 rounded p-3">
-                  <p className="text-xs text-gray-500">Date/Time</p>
-                  <p className="font-medium">
-                    {new Date(selectedOrder.createdAt).toLocaleString("en-NG")}
-                  </p>
-                </div>
-                <div className="bg-gray-50 rounded p-3">
-                  <p className="text-xs text-gray-500">Staff</p>
-                  <p className="font-medium">
-                    {selectedOrder.processedBy?.name}
-                  </p>
-                </div>
-                {selectedOrder.customerName && (
+              {/* Body */}
+              <div className="overflow-y-auto flex-1 p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-sm">
                   <div className="bg-gray-50 rounded p-3">
-                    <p className="text-xs text-gray-500">Customer</p>
-                    <p className="font-medium">{selectedOrder.customerName}</p>
-                    <p className="text-xs text-gray-400">
-                      {selectedOrder.customerPhone}
+                    <p className="text-xs text-gray-500">Date/Time</p>
+                    <p className="font-medium">
+                      {new Date(selectedOrder.createdAt).toLocaleString(
+                        "en-NG",
+                      )}
                     </p>
                   </div>
-                )}
-                <div className="bg-gray-50 rounded p-3">
-                  <p className="text-xs text-gray-500">Payment</p>
-                  <p className="font-medium">{selectedOrder.paymentMethod}</p>
-                  {selectedOrder.amountTendered !== undefined && (
-                    <p className="text-xs text-gray-400">
-                      Tendered: {formatPrice(selectedOrder.amountTendered)}
+                  <div className="bg-gray-50 rounded p-3">
+                    <p className="text-xs text-gray-500">Staff</p>
+                    <p className="font-medium">
+                      {selectedOrder.processedBy?.name}
                     </p>
+                  </div>
+                  {selectedOrder.customerName && (
+                    <div className="bg-gray-50 rounded p-3">
+                      <p className="text-xs text-gray-500">Customer</p>
+                      <p className="font-medium">
+                        {selectedOrder.customerName}
+                      </p>
+                      {selectedOrder.customerPhone && (
+                        <p className="text-xs text-gray-400">
+                          {selectedOrder.customerPhone}
+                        </p>
+                      )}
+                    </div>
                   )}
-                  {selectedOrder.changeGiven !== undefined &&
-                    selectedOrder.changeGiven > 0 && (
+                  <div className="bg-gray-50 rounded p-3">
+                    <p className="text-xs text-gray-500">Payment</p>
+                    <p className="font-medium">{selectedOrder.paymentMethod}</p>
+                    {selectedOrder.amountTendered !== undefined && (
                       <p className="text-xs text-gray-400">
-                        Change: {formatPrice(selectedOrder.changeGiven)}
+                        Tendered: {formatPrice(selectedOrder.amountTendered)}
                       </p>
                     )}
+                    {selectedOrder.changeGiven !== undefined &&
+                      selectedOrder.changeGiven > 0 && (
+                        <p className="text-xs text-gray-400">
+                          Change: {formatPrice(selectedOrder.changeGiven)}
+                        </p>
+                      )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Items */}
-              <div>
-                <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
-                  Items
-                </h4>
-                <div className="divide-y divide-gray-100 border border-gray-200 rounded">
-                  {selectedOrder.items.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {item.productName}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {item.productSku}
-                          {item.netWeight && ` · ${item.netWeight}`}
-                          {item.discountApplied > 0 &&
-                            ` · -${item.discountApplied}% disc.`}
-                        </p>
+                {/* Items */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                    Items
+                  </h4>
+                  <div className="divide-y divide-gray-100 border border-gray-200 rounded">
+                    {selectedOrder.items.map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between px-3 py-2 text-sm"
+                      >
+                        <div>
+                          <p className="font-medium text-gray-900">
+                            {item.productName}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {item.productSku}
+                            {item.netWeight && ` · ${item.netWeight}`}
+                            {item.discountApplied > 0 &&
+                              ` · -${item.discountApplied}% disc.`}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold">
+                            {formatPrice(item.subtotal)}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {item.scaleUnit
+                              ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit} × ${formatPrice(item.unitPrice)}/${item.scaleUnit}`
+                              : `${item.quantity} × ${formatPrice(item.unitPrice)}`}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-semibold">
-                          {formatPrice(item.subtotal)}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {item.quantity} × {formatPrice(item.unitPrice)}
-                        </p>
-                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Totals */}
+                <div className="border-t pt-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Subtotal</span>
+                    <span>{formatPrice(selectedOrder.subtotal)}</span>
+                  </div>
+                  {selectedOrder.discountAmount > 0 && (
+                    <div className="flex justify-between text-green-700">
+                      <span>Discount</span>
+                      <span>-{formatPrice(selectedOrder.discountAmount)}</span>
                     </div>
-                  ))}
+                  )}
+                  <div className="flex justify-between font-extrabold text-gray-900 text-base pt-1 border-t">
+                    <span>Total</span>
+                    <span>{formatPrice(selectedOrder.total)}</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Totals */}
-              <div className="border-t pt-3 space-y-1.5 text-sm">
-                <div className="flex justify-between text-gray-600">
-                  <span>Subtotal</span>
-                  <span>{formatPrice(selectedOrder.subtotal)}</span>
-                </div>
-                {selectedOrder.discountAmount > 0 && (
-                  <div className="flex justify-between text-green-700">
-                    <span>Discount</span>
-                    <span>-{formatPrice(selectedOrder.discountAmount)}</span>
+                {/* Void */}
+                {selectedOrder.status === "COMPLETED" && (
+                  <div className="border border-red-200 rounded-lg p-3 bg-red-50">
+                    <p className="text-xs font-semibold text-red-700 mb-2">
+                      Void this order (stock will be restored)
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Reason for voiding..."
+                      value={voidReason}
+                      onChange={(e) => setVoidReason(e.target.value)}
+                      className="w-full border border-red-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-red-400 mb-2"
+                    />
+                    <button
+                      onClick={() => handleVoid(selectedOrder.id)}
+                      disabled={voiding || !voidReason.trim()}
+                      className="w-full py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {voiding ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <XCircle className="w-4 h-4" /> Void Order
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
-                <div className="flex justify-between font-extrabold text-gray-900 text-base pt-1">
-                  <span>Total</span>
-                  <span>{formatPrice(selectedOrder.total)}</span>
-                </div>
               </div>
 
-              {/* Void option for completed orders */}
-              {selectedOrder.status === "COMPLETED" && (
-                <div className="border border-red-200 rounded-lg p-3 bg-red-50">
-                  <p className="text-xs font-semibold text-red-700 mb-2">
-                    Void this order (stock will be restored)
-                  </p>
-                  <input
-                    type="text"
-                    placeholder="Reason for voiding..."
-                    value={voidReason}
-                    onChange={(e) => setVoidReason(e.target.value)}
-                    className="w-full border border-red-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-red-400 mb-2"
-                  />
-                  <button
-                    onClick={() => handleVoid(selectedOrder.id)}
-                    disabled={voiding || !voidReason.trim()}
-                    className="w-full py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {voiding ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <XCircle className="w-4 h-4" />
-                        Void Order
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
+              {/* Footer */}
+              <div className="border-t p-4 flex gap-3">
+                <button
+                  onClick={() =>
+                    printViaIframe(buildReceiptHtml(selectedOrder))
+                  }
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
+                >
+                  <Printer className="w-4 h-4" /> Print Receipt
+                </button>
+                <button
+                  onClick={() => setSelectedOrder(null)}
+                  className="flex-1 py-2.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 text-sm"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-
-            <div className="border-t p-4 flex gap-3">
-              <button
-                onClick={() => printReceipt(selectedOrder)}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
-              >
-                <Printer className="w-4 h-4" />
-                Print Receipt
-              </button>
-              <button
-                onClick={() => setShowDetail(false)}
-                className="flex-1 py-2.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 text-sm"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

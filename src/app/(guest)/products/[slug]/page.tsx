@@ -479,7 +479,8 @@ export default function ProductDetailPage() {
               ) : product.stockStatus === "LOW_STOCK" ? (
                 <span className="inline-flex items-center gap-1.5 text-sm text-orange-600">
                   <span className="w-2 h-2 rounded-full bg-orange-500" /> Low
-                  Stock — Only {product.stockQuantity} left
+                  Stock — Only {product.stockQuantity}
+                  {isScalable ? ` ${unit}` : ""} left
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-sm text-green-600">
@@ -627,8 +628,11 @@ export default function ProductDetailPage() {
                             image: product.images?.[0] || "",
                             sku: product.sku,
                             stockQuantity: product.stockQuantity,
+                            isScalable: true,
                             scaleUnit: unit,
-                            scaleQty,
+                            scaleStep: step,
+                            minOrderQty: minQty,
+                            maxOrderQty: product.maxOrderQty,
                           })
                         }
                         disabled={cartLoading || scaleQty < minQty}

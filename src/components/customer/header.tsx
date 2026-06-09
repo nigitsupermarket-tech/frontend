@@ -147,7 +147,8 @@ function CategoryBar({ categories }: { categories: Category[] }) {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search)
       : null;
-  const activeCatId = searchParams?.get("categorySlug") ?? searchParams?.get("categoryId") ?? "";
+  const activeCatId =
+    searchParams?.get("categorySlug") ?? searchParams?.get("categoryId") ?? "";
   if (!categories.length) return null;
 
   return (
@@ -180,7 +181,8 @@ function CategoryBar({ categories }: { categories: Category[] }) {
             style={{ scrollbarWidth: "none" }}
           >
             {categories.map((cat) => {
-              const isActive = activeCatId === cat.slug || activeCatId === cat.id;
+              const isActive =
+                activeCatId === cat.slug || activeCatId === cat.id;
               const hasSvg = !!cat.svgIcon;
               const hasImage = !!cat.image;
               const hasAnyIcon = hasSvg || hasImage;
@@ -188,7 +190,9 @@ function CategoryBar({ categories }: { categories: Category[] }) {
               return (
                 <button
                   key={cat.id}
-                  onClick={() => router.push(`/products?categorySlug=${cat.slug}`)}
+                  onClick={() =>
+                    router.push(`/products?categorySlug=${cat.slug}`)
+                  }
                   className={cn(
                     "group shrink-0 flex items-center gap-2 px-4 py-3 text-xs font-semibold whitespace-nowrap transition-all duration-200 border-b-2",
                     isActive
@@ -519,7 +523,9 @@ export function Header() {
                   <ShoppingCart className="w-5 h-5" />
                   {itemCount > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-brand-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
-                      {itemCount > 99 ? "99+" : itemCount}
+                      {Math.floor(itemCount) > 99
+                        ? "99+"
+                        : Math.floor(itemCount)}
                     </span>
                   )}
                 </button>

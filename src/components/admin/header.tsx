@@ -77,14 +77,14 @@ export function AdminHeader() {
                     My Account
                   </Link>
                   {user?.role === "ADMIN" && (
-                  <Link
-                    href="/admin/settings"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
-                  >
-                    <Settings className="w-4 h-4 text-gray-400" />
-                    Settings
-                  </Link>
+                    <Link
+                      href="/admin/settings"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg"
+                    >
+                      <Settings className="w-4 h-4 text-gray-400" />
+                      Settings
+                    </Link>
                   )}
                   <button
                     onClick={() => {

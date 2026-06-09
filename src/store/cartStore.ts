@@ -9,12 +9,18 @@ import { useAuthStore } from "@/store/authStore";
 
 interface GuestCartItem {
   productId: string;
-  quantity: number;
-  price: number;
+  quantity: number; // float for scalable (e.g. 1.5 for 1.5 kg)
+  price: number; // pricePerUnit for scalable, product.price for fixed
   name: string;
   image: string;
   sku?: string;
   stockQuantity: number;
+  // scalable-specific
+  isScalable?: boolean;
+  scaleUnit?: string;
+  scaleStep?: number;
+  minOrderQty?: number;
+  maxOrderQty?: number;
 }
 
 interface CartStore {
@@ -46,14 +52,17 @@ interface CartStore {
   toggleCart: () => void;
 }
 
+// itemCount = number of distinct line items in cart (not sum of quantities)
+// This is what the header badge and UI labels should show.
+// Summing float quantities (e.g. 3.7 kg + 2 units = 5.7) is meaningless for display.
 const calcTotals = (items: CartItem[]) => ({
   subtotal: items.reduce((s, i) => s + i.price * i.quantity, 0),
-  itemCount: items.reduce((s, i) => s + i.quantity, 0),
+  itemCount: items.length,
 });
 
 const calcGuestTotals = (items: GuestCartItem[]) => ({
   subtotal: items.reduce((s, i) => s + i.price * i.quantity, 0),
-  itemCount: items.reduce((s, i) => s + i.quantity, 0),
+  itemCount: items.length,
 });
 
 export const useCartStore = create<CartStore>()(
@@ -83,14 +92,16 @@ export const useCartStore = create<CartStore>()(
             };
           }>("/cart");
           const { items, summary } = res.data;
+          const cartItems = items || [];
           set({
-            items: items || [],
+            items: cartItems,
             subtotal: summary?.subtotal || 0,
-            itemCount: summary?.itemCount || 0,
+            // Use items.length — server summary.itemCount sums float quantities
+            // which shows wrong numbers (e.g. 3.7) in the header badge
+            itemCount: cartItems.length,
           });
         } catch {
-          // Do NOT wipe items on a failed fetch — keep whatever is currently
-          // in the store. A failed GET /cart should never blank the cart UI.
+          // Do NOT wipe items on a failed fetch
         } finally {
           set({ isLoading: false });
         }
@@ -103,10 +114,21 @@ export const useCartStore = create<CartStore>()(
           const { guestItems } = get();
           const existing = guestItems.find((i) => i.productId === productId);
           if (existing) {
+            // For scalable: add float amounts; for fixed: add integers
+            const step = existing.scaleStep || 0.1;
+            const newQty = existing.isScalable
+              ? parseFloat(
+                  (
+                    Math.round((existing.quantity + quantity) / step) * step
+                  ).toFixed(10),
+                )
+              : existing.quantity + quantity;
+            const maxQty =
+              existing.maxOrderQty ??
+              (existing.isScalable ? existing.stockQuantity : 999);
+            const clamped = Math.min(newQty, maxQty);
             const updated = guestItems.map((i) =>
-              i.productId === productId
-                ? { ...i, quantity: i.quantity + quantity }
-                : i,
+              i.productId === productId ? { ...i, quantity: clamped } : i,
             );
             set({
               guestItems: updated,
@@ -122,6 +144,11 @@ export const useCartStore = create<CartStore>()(
               image: productMeta?.image || "",
               sku: productMeta?.sku,
               stockQuantity: productMeta?.stockQuantity || 999,
+              isScalable: productMeta?.isScalable,
+              scaleUnit: productMeta?.scaleUnit,
+              scaleStep: productMeta?.scaleStep,
+              minOrderQty: productMeta?.minOrderQty,
+              maxOrderQty: productMeta?.maxOrderQty,
             };
             const updated = [...guestItems, newItem];
             set({
@@ -143,14 +170,14 @@ export const useCartStore = create<CartStore>()(
             };
           }>("/cart", { productId, quantity });
           const { cart, summary } = res.data;
+          const cartItems = cart.items || [];
           set({
-            items: cart.items,
+            items: cartItems,
             subtotal: summary.subtotal,
-            itemCount: summary.itemCount,
+            itemCount: cartItems.length,
             isOpen: true,
           });
         } catch (err) {
-          // Re-throw so useCart.addToCart can catch and show the toast
           throw err;
         } finally {
           set({ isLoading: false });
@@ -198,7 +225,7 @@ export const useCartStore = create<CartStore>()(
           return;
         }
 
-        // Optimistic update — update locally first, sync server in background
+        // Optimistic update
         const prevItems = get().items;
         const optimistic = prevItems.map((i) =>
           i.id === itemId ? { ...i, quantity } : i,
@@ -207,15 +234,10 @@ export const useCartStore = create<CartStore>()(
 
         try {
           await apiPut(`/cart/${itemId}`, { quantity });
-          // Optimistic update is already applied — no need to re-fetch.
-          // Re-fetching risks wiping the cart if the GET arrives before the
-          // PUT commits, or if there's a brief auth/network hiccup.
         } catch (err: any) {
           if (err?.response?.status === 404) {
-            // Stale item ID — refresh to get current server state
             await get().fetchCart();
           } else {
-            // Real error — revert the optimistic update
             set({ items: prevItems, ...calcTotals(prevItems) });
           }
           throw err;
@@ -229,25 +251,19 @@ export const useCartStore = create<CartStore>()(
           return;
         }
 
-        // Optimistic removal — remove from UI immediately, no rollback on 404
         const prevItems = get().items;
         const newItems = prevItems.filter((i) => i.id !== itemId);
         set({ items: newItems, ...calcTotals(newItems) });
 
         try {
           await apiDelete(`/cart/${itemId}`);
-          // Optimistic removal is already applied — only re-fetch if needed
         } catch (err: any) {
           if (err?.response?.status === 404) {
-            // Already gone — optimistic removal was correct, keep it
+            // already gone — keep optimistic removal
           } else {
-            // Real error — restore the item
             set({ items: prevItems, ...calcTotals(prevItems) });
           }
         }
-        // Re-fetch only to sync fresh IDs (e.g. after a 404 stale-ID case above).
-        // We skip this on success because the optimistic state is already correct
-        // and a re-fetch risks a brief empty-cart flash if GET is slow.
       },
 
       clearCart: async () => {
