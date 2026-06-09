@@ -2,7 +2,7 @@
 
 // frontend/src/app/(guest)/products/page.tsx
 
-import { useState, useEffect, useCallback, Suspense, useRef } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   ChevronDown,

@@ -180,6 +180,19 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [scaleInput, setScaleInput] = useState(""); // typed input string for scalable
 
+  // Sync scaleQty to product's minOrderQty once product is loaded
+  // Must be declared before any early returns to satisfy Rules of Hooks
+  useEffect(() => {
+    if (!product) return;
+    const isScalableProduct = !!product.isScalable;
+    const minQtyProduct = product.minOrderQty || product.scaleStep || 0.1;
+    if (isScalableProduct && minQtyProduct) {
+      setScaleQty(minQtyProduct);
+      setScaleInput(String(minQtyProduct));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product?.id]);
+
   if (isLoading) {
     console.log("[ProductDetailPage] ⏳ Still loading product...");
     return <PageLoader />;
@@ -221,16 +234,6 @@ export default function ProductDetailPage() {
     setScaleQty((q) => Math.max(minQty, roundStep(q - step)));
   const scaleIncrement = () =>
     setScaleQty((q) => Math.min(maxQtyScale, roundStep(q + step)));
-
-  // Sync scaleQty to product's minOrderQty once product is loaded
-  // (useState(0.1) is a placeholder; real default comes from minOrderQty)
-  useEffect(() => {
-    if (isScalable && minQty) {
-      setScaleQty(minQty);
-      setScaleInput(String(minQty));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [product.id]);
 
   const effectivePrice =
     isScalable && product.pricePerUnit
