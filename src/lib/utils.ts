@@ -87,6 +87,25 @@ export function generateSlug(text: string): string {
     .trim();
 }
 
+// ─── SKU generation ───────────────────────────────────────────────────────────
+// Produces a SKU like: CHKNOOD-842F3 from "Chicken Noodles"
+// Format: up to 8 chars of uppercased initials/letters + dash + 5 random hex chars
+export function generateSKU(productName: string): string {
+  if (!productName.trim()) return "";
+  // Take up to first 3 words, grab first 3 letters each, uppercase
+  const words = productName.trim().split(/\s+/).slice(0, 3);
+  const prefix = words
+    .map((w) => w.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3))
+    .join("")
+    .slice(0, 8);
+  // 5-char random hex suffix
+  const suffix = Math.floor(Math.random() * 0xfffff)
+    .toString(16)
+    .toUpperCase()
+    .padStart(5, "0");
+  return `${prefix}-${suffix}`;
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

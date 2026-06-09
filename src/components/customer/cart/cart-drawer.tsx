@@ -197,8 +197,19 @@ export function CartDrawer() {
                         {item.product.sku}
                       </p>
                     )}
+                    {/* Show unit label for scalable products */}
+                    {(item as any).scaleUnit && (
+                      <p className="text-xs text-green-700 font-semibold mt-0.5">
+                        {(item as any).scaleQty ?? item.quantity} {(item as any).scaleUnit}
+                      </p>
+                    )}
                     <p className="mt-1 text-sm font-semibold text-brand-700">
                       {formatPrice(item.price)}
+                      {(item as any).scaleUnit && (
+                        <span className="text-xs text-gray-400 font-normal ml-1">
+                          per {(item as any).scaleUnit}
+                        </span>
+                      )}
                     </p>
                     <div className="flex items-center justify-between mt-2.5">
                       {/* Quantity stepper */}

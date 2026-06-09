@@ -12,6 +12,8 @@ interface ProductMeta {
   image?: string;
   sku?: string;
   stockQuantity?: number;
+  scaleUnit?: string;
+  scaleQty?: number;
 }
 
 // Map raw API error messages to user-friendly equivalents

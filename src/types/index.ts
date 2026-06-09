@@ -141,6 +141,15 @@ export interface Product {
   isOnPromotion?: boolean;
   promotionEndsAt?: string;
 
+  // ── Scalable / weighted product ──
+  isScalable?: boolean;
+  scaleUnit?: string;        // e.g. "kg", "L", "cup", "custom"
+  pricePerUnit?: number;     // price per 1 unit
+  minOrderQty?: number;      // e.g. 0.1
+  maxOrderQty?: number;      // e.g. 10
+  scaleStep?: number;        // e.g. 0.1
+  scalePresets?: number[];   // e.g. [0.5, 1, 1.5, 2, 3]
+
   // Timestamps
   createdAt: string;
   updatedAt: string;

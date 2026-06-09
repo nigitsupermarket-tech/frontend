@@ -18,6 +18,7 @@ import {
   Package,
   Globe,
   X,
+  Scale,
 } from "lucide-react";
 import { useProduct } from "@/hooks/useProducts";
 import { useCart } from "@/hooks/useCart";
@@ -141,10 +142,14 @@ export default function ProductDetailPage() {
   );
 
   const [selectedImage, setSelectedImage] = useState(0);
-  const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState<"description" | "nutrition" | "reviews">("description");
   const [quoteOpen, setQuoteOpen] = useState(false);
-  const [wishlisted, setWishlisted] = useState(false);
+  const [favorited, setFavorited] = useState(false);
+
+  // Scalable state — safe initial values; real values set after null guard below
+  const [scaleQty, setScaleQty] = useState(0.1);
+  const [quantity, setQuantity] = useState(1);
+  const [scaleInput, setScaleInput] = useState(""); // typed input string for scalable
 
   if (isLoading) {
     console.log("[ProductDetailPage] ⏳ Still loading product...");
@@ -160,6 +165,35 @@ export default function ProductDetailPage() {
   }
 
   console.log("[ProductDetailPage] ✅ Product loaded:", product.name, "| id:", product.id);
+
+  // ── Scalable product values (safe — product is guaranteed non-null here) ──
+  const isScalable = !!product.isScalable;
+  const unit = product.scaleUnit || "unit";
+  const step = product.scaleStep || 0.1;
+  const minQty = product.minOrderQty || step;
+  const maxQtyScale = product.maxOrderQty || (product.trackInventory ? product.stockQuantity : 9999);
+  const presets = product.scalePresets?.length ? product.scalePresets : [];
+
+  const roundStep = (val: number) => parseFloat((Math.round(val / step) * step).toFixed(10));
+  const scaleDecrement = () => setScaleQty((q) => Math.max(minQty, roundStep(q - step)));
+  const scaleIncrement = () => setScaleQty((q) => Math.min(maxQtyScale, roundStep(q + step)));
+
+  // Sync scaleQty to product's minOrderQty once product is loaded
+  // (useState(0.1) is a placeholder; real default comes from minOrderQty)
+  useEffect(() => {
+    if (isScalable && minQty) {
+      setScaleQty(minQty);
+      setScaleInput(String(minQty));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product.id]);
+
+  const effectivePrice = isScalable && product.pricePerUnit
+    ? product.pricePerUnit * scaleQty
+    : product.price;
+
+  const scaleDisplay = (v: number) =>
+    v % 1 === 0 ? `${v.toFixed(0)} ${unit}` : `${v.toFixed(1)} ${unit}`;
 
   const discount = product.comparePrice
     ? calculateDiscountPercent(product.comparePrice, product.price)
@@ -280,13 +314,31 @@ export default function ProductDetailPage() {
 
             {!settings.hidePricing && (
               <div className="flex items-center gap-3 mt-4">
-                <span className="text-3xl font-bold text-brand-700">{formatPrice(product.price)}</span>
-                {product.comparePrice && product.comparePrice > product.price && (
+                {isScalable && product.pricePerUnit ? (
                   <>
-                    <span className="text-xl text-gray-400 line-through">{formatPrice(product.comparePrice)}</span>
-                    <span className="px-2.5 py-0.5 bg-red-100 text-red-700 text-sm font-bold rounded-full">
-                      -{discount}%
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-3xl font-bold text-brand-700">
+                        {formatPrice(effectivePrice)}
+                      </span>
+                      <span className="text-sm text-gray-400">
+                        ({formatPrice(product.pricePerUnit)}/{unit})
+                      </span>
+                    </div>
+                    <span className="flex items-center gap-1 px-2.5 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-full">
+                      <Scale className="w-3 h-3" /> Sold per {unit}
                     </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-3xl font-bold text-brand-700">{formatPrice(product.price)}</span>
+                    {product.comparePrice && product.comparePrice > product.price && (
+                      <>
+                        <span className="text-xl text-gray-400 line-through">{formatPrice(product.comparePrice)}</span>
+                        <span className="px-2.5 py-0.5 bg-red-100 text-red-700 text-sm font-bold rounded-full">
+                          -{discount}%
+                        </span>
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -328,39 +380,144 @@ export default function ProductDetailPage() {
               )}
             </div>
 
-            {/* CTA buttons */}
+            {/* ── CTA ── */}
             {settings.hidePricing ? (
-              <div className="mt-6 flex items-center gap-3">
-                <div className="flex items-center border border-gray-200 rounded-xl">
-                  <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={quantity <= 1} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <span className="w-12 text-center font-semibold">{quantity}</span>
-                  <button onClick={() => setQuantity(Math.min(99, quantity + 1))} disabled={quantity >= 99} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
-                    <Plus className="w-4 h-4" />
+              <div className="mt-6 space-y-3">
+                {/* Quote quantity selector */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center border border-gray-200 rounded-xl">
+                    <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={quantity <= 1} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <span className="w-12 text-center font-semibold">{quantity}</span>
+                    <button onClick={() => setQuantity(Math.min(99, quantity + 1))} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button onClick={() => setQuoteOpen(true)} className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 flex items-center justify-center gap-2 transition-colors">
+                    Request a Quote
                   </button>
                 </div>
-                <button onClick={() => setQuoteOpen(true)} className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 flex items-center justify-center gap-2 transition-colors">
-                  Request a Quote
-                </button>
               </div>
             ) : !isOutOfStock ? (
-              <div className="mt-6 flex items-center gap-3">
-                <div className="flex items-center border border-gray-200 rounded-xl">
-                  <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={quantity <= 1} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <span className="w-12 text-center font-semibold">{quantity}</span>
-                  <button onClick={() => setQuantity(Math.min(maxQty, quantity + 1))} disabled={quantity >= maxQty} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-                <button onClick={() => addToCart(product.id, quantity, { price: product.price, name: product.name, image: product.images?.[0] || '', sku: product.sku, stockQuantity: product.stockQuantity })} disabled={cartLoading} className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors">
-                  <ShoppingCart className="w-5 h-5" /> Add to Cart
-                </button>
-                <button onClick={() => setWishlisted((w) => !w)} className={`p-3.5 border rounded-xl transition-colors ${wishlisted ? "border-red-300 text-red-500 bg-red-50" : "border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200"}`}>
-                  <Heart className={`w-5 h-5 ${wishlisted ? "fill-red-500" : ""}`} />
-                </button>
+              <div className="mt-6 space-y-3">
+                {/* ── Scalable quantity selector ── */}
+                {isScalable ? (
+                  <div className="space-y-3">
+                    {/* Presets */}
+                    {presets.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 mb-2">Quick select:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {presets.map((p) => (
+                            <button
+                              key={p}
+                              onClick={() => { setScaleQty(p); setScaleInput(String(p)); }}
+                              className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition-colors ${
+                                scaleQty === p
+                                  ? "bg-green-600 text-white border-green-600"
+                                  : "border-gray-200 text-gray-700 hover:border-green-500"
+                              }`}
+                            >
+                              {scaleDisplay(p)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stepper + direct input */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
+                        <button onClick={scaleDecrement} disabled={scaleQty <= minQty} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                          <Minus className="w-4 h-4" />
+                        </button>
+                        {/* Direct type-in input */}
+                        <input
+                          type="number"
+                          min={minQty}
+                          max={maxQtyScale || undefined}
+                          step={step}
+                          value={scaleInput}
+                          onChange={(e) => {
+                            setScaleInput(e.target.value);
+                            const v = parseFloat(e.target.value);
+                            if (!isNaN(v) && v >= minQty) setScaleQty(v);
+                          }}
+                          onBlur={() => {
+                            // Clamp on blur
+                            const clamped = Math.min(Math.max(scaleQty, minQty), maxQtyScale);
+                            setScaleQty(clamped);
+                            setScaleInput(String(clamped));
+                          }}
+                          className="w-24 text-center font-semibold text-sm border-x border-gray-200 py-3 focus:outline-none focus:bg-green-50"
+                          placeholder={`${minQty} ${unit}`}
+                        />
+                        <button onClick={scaleIncrement} disabled={scaleQty >= maxQtyScale} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <span className="text-sm text-gray-500 font-medium">{unit}</span>
+                      <div className="text-right flex-1">
+                        <p className="text-2xl font-bold text-brand-700">{formatPrice(effectivePrice)}</p>
+                        {product.pricePerUnit && (
+                          <p className="text-xs text-gray-400">{formatPrice(product.pricePerUnit)}/{unit}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Step hint */}
+                    <p className="text-xs text-gray-400">
+                      Min: {scaleDisplay(minQty)} · Step: {step} {unit}
+                      {maxQtyScale < 9999 ? ` · Max: ${scaleDisplay(maxQtyScale)}` : ""}
+                    </p>
+
+                    {/* Add to cart */}
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => addToCart(product.id, scaleQty, {
+                          price: product.pricePerUnit || product.price,
+                          name: product.name,
+                          image: product.images?.[0] || "",
+                          sku: product.sku,
+                          stockQuantity: product.stockQuantity,
+                          scaleUnit: unit,
+                          scaleQty,
+                        })}
+                        disabled={cartLoading || scaleQty < minQty}
+                        className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+                      >
+                        <ShoppingCart className="w-5 h-5" /> Add {scaleDisplay(scaleQty)} to Cart
+                      </button>
+                      <button onClick={() => setFavorited((w) => !w)} className={`p-3.5 border rounded-xl transition-colors ${favorited ? "border-red-300 text-red-500 bg-red-50" : "border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200"}`}>
+                        <Heart className={`w-5 h-5 ${favorited ? "fill-red-500" : ""}`} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Standard fixed-quantity selector */
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center border border-gray-200 rounded-xl">
+                      <button onClick={() => setQuantity(Math.max(1, quantity - 1))} disabled={quantity <= 1} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                        <Minus className="w-4 h-4" />
+                      </button>
+                      <span className="w-12 text-center font-semibold">{quantity}</span>
+                      <button onClick={() => setQuantity(Math.min(maxQty, quantity + 1))} disabled={quantity >= maxQty} className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => addToCart(product.id, quantity, { price: product.price, name: product.name, image: product.images?.[0] || "", sku: product.sku, stockQuantity: product.stockQuantity })}
+                      disabled={cartLoading}
+                      className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <ShoppingCart className="w-5 h-5" /> Add to Cart
+                    </button>
+                    <button onClick={() => setFavorited((w) => !w)} className={`p-3.5 border rounded-xl transition-colors ${favorited ? "border-red-300 text-red-500 bg-red-50" : "border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200"}`}>
+                      <Heart className={`w-5 h-5 ${favorited ? "fill-red-500" : ""}`} />
+                    </button>
+                  </div>
+                )}
               </div>
             ) : null}
 
