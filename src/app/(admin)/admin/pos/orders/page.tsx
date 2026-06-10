@@ -79,9 +79,9 @@ function buildReceiptHtml(order: POSOrder): string {
         : `&#8358;${item.unitPrice.toLocaleString()}`;
       return `
     <tr>
-      <td style="padding:1mm 0;font-weight:bold;">${item.productName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</td>
-      <td style="text-align:right;white-space:nowrap;font-weight:bold;">${qtyLabel}&times;${priceLabel}</td>
-      <td style="text-align:right;white-space:nowrap;font-weight:bold;">&#8358;${item.subtotal.toLocaleString()}</td>
+      <td style="padding:1mm 0;"><strong>${item.productName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</strong></td>
+      <td style="text-align:right;white-space:nowrap;"><strong>${qtyLabel}&times;${priceLabel}</strong></td>
+      <td style="text-align:right;white-space:nowrap;"><strong>&#8358;${item.subtotal.toLocaleString()}</strong></td>
     </tr>
   `;
     })
@@ -91,25 +91,40 @@ function buildReceiptHtml(order: POSOrder): string {
     <meta charset="utf-8"/>
     <style>
       @page { size: 80mm auto; margin: 2mm 0; }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
-             font-weight: bold; width: 76mm; margin: 0 auto; line-height: 1.5; }
+      * { 
+        box-sizing: border-box; 
+        margin: 0; 
+        padding: 0; 
+        /* Maximize boldness and use text-stroke to artificially thicken the text font */
+        font-weight: 900 !important; 
+        -webkit-text-stroke: 0.4px black;
+      }
+      body { 
+        font-family: 'Courier New', Courier, monospace; 
+        font-size: 13px; /* Slightly bumped up for better receipt clarity */
+        width: 76mm; 
+        margin: 0 auto; 
+        line-height: 1.5; 
+      }
       .c { text-align: center; }
       .r { text-align: right; }
-      hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
+      hr { border: none; border-top: 2px dashed #000; margin: 2mm 0; -webkit-text-stroke: none; }
       table { width: 100%; border-collapse: collapse; }
-      .total-row td { font-size: 15px; border-top: 1px dashed #000;
-                      padding-top: 2mm; font-weight: bold; }
+      .total-row td { 
+        font-size: 16px; 
+        border-top: 2px dashed #000;
+        padding-top: 2mm; 
+      }
     </style>
   </head><body>
-    <div class="c" style="font-size:15px;">NigitTriple Supermarket</div>
-    <div class="c">30, Abuloma Road (Bozgomero Estate)</div>
-    <div class="c">Port Harcourt · +234 916 977 6138</div>
+    <div class="c" style="font-size:16px;"><strong>NigitTriple Supermarket</strong></div>
+    <div class="c"><strong>30, Abuloma Road (Bozgomero Estate)</strong></div>
+    <div class="c"><strong>Port Harcourt · +234 916 977 6138</strong></div>
     <hr/>
-    <div class="c">${order.receiptNumber}</div>
-    <div class="c">${new Date(order.createdAt).toLocaleString("en-NG")}</div>
-    ${order.customerName ? `<div class="c">Customer: ${order.customerName}</div>` : ""}
-    <div class="c">Staff: ${order.processedBy?.name || "—"}</div>
+    <div class="c"><strong>${order.receiptNumber}</strong></div>
+    <div class="c"><strong>${new Date(order.createdAt).toLocaleString("en-NG")}</strong></div>
+    ${order.customerName ? `<div class="c"><strong>Customer: ${order.customerName}</strong></div>` : ""}
+    <div class="c"><strong>Staff: ${order.processedBy?.name || "—"}</strong></div>
     <hr/>
     <table>
       <colgroup><col style="width:45%"/><col style="width:30%"/><col style="width:25%"/></colgroup>
@@ -117,14 +132,14 @@ function buildReceiptHtml(order: POSOrder): string {
     </table>
     <hr/>
     <table>
-      ${order.discountAmount > 0 ? `<tr><td>Discount</td><td class="r">-&#8358;${order.discountAmount.toLocaleString()}</td></tr>` : ""}
-      <tr class="total-row"><td>TOTAL</td><td class="r">&#8358;${order.total.toLocaleString()}</td></tr>
-      <tr><td>Payment</td><td class="r">${order.paymentMethod}</td></tr>
-      ${order.amountTendered ? `<tr><td>Tendered</td><td class="r">&#8358;${order.amountTendered.toLocaleString()}</td></tr>` : ""}
-      ${order.changeGiven && order.changeGiven > 0 ? `<tr><td>Change</td><td class="r">&#8358;${order.changeGiven.toLocaleString()}</td></tr>` : ""}
+      ${order.discountAmount > 0 ? `<tr><td><strong>Discount</strong></td><td class="r"><strong>-&#8358;${order.discountAmount.toLocaleString()}</strong></td></tr>` : ""}
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td class="r"><strong>&#8358;${order.total.toLocaleString()}</strong></td></tr>
+      <tr><td><strong>Payment</strong></td><td class="r"><strong>${order.paymentMethod}</strong></td></tr>
+      ${order.amountTendered ? `<tr><td><strong>Tendered</strong></td><td class="r"><strong>&#8358;${order.amountTendered.toLocaleString()}</strong></td></tr>` : ""}
+      ${order.changeGiven && order.changeGiven > 0 ? `<tr><td><strong>Change</strong></td><td class="r"><strong>&#8358;${order.changeGiven.toLocaleString()}</strong></td></tr>` : ""}
     </table>
     <hr/>
-    <div class="c" style="font-size:9px;color:#666;">Software by Calstins Ltd · calstins.com</div>
+    <div class="c" style="font-size:10px;"><strong>Software by Calstins Ltd · calstins.com</strong></div>
   </body></html>`;
 }
 
