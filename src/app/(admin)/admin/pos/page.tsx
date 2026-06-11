@@ -31,6 +31,8 @@ import {
   Grid3x3,
   LayoutList,
   Camera,
+  PauseCircle,
+  PlayCircle,
 } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -94,6 +96,29 @@ interface CompletedOrder {
   customerPhone?: string;
   processedAt: Date;
   receiptNumber: string;
+}
+// A POS order that has been suspended (retrieved from the API)
+interface SuspendedOrder {
+  id: string;
+  posOrderNumber: string;
+  suspendedAt: string;
+  suspendLabel?: string | null;
+  customerName?: string | null;
+  subtotal: number;
+  total: number;
+  items: {
+    id: string;
+    productId: string;
+    productName: string;
+    productSku: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+    discountApplied: number;
+    barcode?: string | null;
+    netWeight?: string | null;
+    scaleUnit?: string | null;
+  }[];
 }
 interface POSSession {
   id: string;
@@ -684,6 +709,16 @@ export default function POSPage() {
   );
   const [showReceipt, setShowReceipt] = useState(false);
 
+  // Suspend / Resume
+  const [suspendedOrders, setSuspendedOrders] = useState<SuspendedOrder[]>([]);
+  const [showSuspendPanel, setShowSuspendPanel] = useState(false);
+  const [suspendLabel, setSuspendLabel] = useState("");
+  const [showSuspendDialog, setShowSuspendDialog] = useState(false);
+  const [suspending, setSuspending] = useState(false);
+  const [resuming, setResuming] = useState<string | null>(null); // orderId being resumed
+  // The DB id of the currently-active suspended order (set when we resume one)
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+
   // ✅ FIX 3: Visual product grid state
   const [productGridMode, setProductGridMode] = useState<"search" | "grid">(
     "search",
@@ -741,6 +776,19 @@ export default function POSPage() {
     };
     checkSession();
   }, []);
+
+  // Fetch suspended orders whenever the session is active
+  const fetchSuspendedOrders = async () => {
+    try {
+      const res = await apiGet<any>("/pos/orders/suspended");
+      setSuspendedOrders(res.data.orders || []);
+    } catch {
+      // silently ignore — suspended list is best-effort
+    }
+  };
+  useEffect(() => {
+    if (session) fetchSuspendedOrders();
+  }, [session]);
 
   // ── Calculations ──
   const subtotal = cart.reduce(
@@ -954,6 +1002,110 @@ export default function POSPage() {
     setShowPayment(false);
     setShowDiscountPanel(false);
     setCustomerType("WALK_IN");
+    setActiveOrderId(null);
+  };
+
+  // ── Suspend current transaction ──────────────────────────────────────────
+  const handleSuspend = async () => {
+    if (cart.length === 0) {
+      toast("Cart is empty — nothing to suspend.", "error");
+      return;
+    }
+    setSuspending(true);
+    try {
+      // Use the dedicated /hold endpoint which saves as SUSPENDED without
+      // touching stock (stock is only deducted when the order is completed).
+      const holdData = {
+        items: cart.map((item) => ({
+          productId: item.product.id,
+          productName: item.product.name,
+          productSku: item.product.sku,
+          barcode: item.product.barcode,
+          netWeight: item.product.netWeight,
+          scaleUnit: item.product.isScalable
+            ? (item.product.scaleUnit ?? null)
+            : null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          subtotal: item.unitPrice * item.quantity * (1 - item.discount / 100),
+          discountApplied: item.discount,
+        })),
+        subtotal,
+        discountAmount: totalDiscount,
+        discountCode: appliedDiscount?.code,
+        total,
+        customerName:
+          customerType === "WALK_IN"
+            ? "Walk-In Customer"
+            : customerName || undefined,
+        customerPhone:
+          customerType === "WALK_IN" ? undefined : customerPhone || undefined,
+        label: suspendLabel.trim() || undefined,
+      };
+
+      await apiPost<any>("/pos/orders/hold", holdData);
+
+      toast("Transaction held. Serve the next customer!", "success");
+      setShowSuspendDialog(false);
+      setSuspendLabel("");
+      clearCart();
+      fetchSuspendedOrders();
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setSuspending(false);
+    }
+  };
+
+  // ── Resume a suspended transaction ───────────────────────────────────────
+  const handleResume = async (order: SuspendedOrder) => {
+    if (cart.length > 0) {
+      toast(
+        "Please suspend or clear the current cart before resuming another transaction.",
+        "error",
+      );
+      return;
+    }
+    setResuming(order.id);
+    try {
+      await apiPut<any>(`/pos/orders/${order.id}/resume`, {});
+
+      // Rebuild cart from the suspended order items
+      const rebuiltCart: CartItem[] = order.items.map((item) => ({
+        product: {
+          id: item.productId,
+          name: item.productName,
+          sku: item.productSku,
+          barcode: item.barcode ?? undefined,
+          price: item.unitPrice,
+          stockQuantity: 9999, // actual stock validated server-side on resume
+          images: [],
+          trackInventory: false,
+          netWeight: item.netWeight ?? undefined,
+          isScalable: !!item.scaleUnit,
+          scaleUnit: item.scaleUnit ?? undefined,
+          pricePerUnit: item.scaleUnit ? item.unitPrice : undefined,
+        } as Product,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discountApplied,
+      }));
+
+      setCart(rebuiltCart);
+      setActiveOrderId(order.id);
+      if (order.customerName && order.customerName !== "Walk-In Customer") {
+        setCustomerType("NAMED");
+        setCustomerName(order.customerName);
+      }
+
+      setSuspendedOrders((prev) => prev.filter((o) => o.id !== order.id));
+      setShowSuspendPanel(false);
+      toast(`Resumed: ${order.posOrderNumber}`, "success");
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setResuming(null);
+    }
   };
 
   const handleApplyCoupon = async () => {
@@ -997,22 +1149,24 @@ export default function POSPage() {
       <style>
         @page { size: 80mm auto; margin: 0; }
         * { box-sizing: border-box; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 11px;
-               width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.4; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
+               width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;
+               color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .text-center, .center { text-align: center; }
-        .font-bold, .bold, b, strong { font-weight: bold; }
-        .text-gray-400, .text-gray-500, .text-gray-600 { color: #555; }
+        .font-bold, .bold, b, strong { font-weight: 900; }
+        .text-gray-400, .text-gray-500, .text-gray-600 { color: #000; }
         .border-t { border-top: 1px dashed #000; margin: 3mm 0; }
         .border-dashed { border-style: dashed; }
         .flex { display: flex; }
         .justify-between { justify-content: space-between; }
         .space-y-1 > * { margin-bottom: 1mm; }
-        .text-base { font-size: 13px; }
-        .text-2xl, .text-xl { font-size: 14px; }
-        .text-xs { font-size: 10px; }
-        .text-\\[10px\\] { font-size: 9px; }
+        .text-base { font-size: 13px; font-weight: 700; }
+        .text-2xl, .text-xl { font-size: 15px; font-weight: 900; }
+        .text-xs { font-size: 11px; }
+        .text-\\[10px\\] { font-size: 10px; }
         .my-2, .mb-3, .mt-3 { margin: 2mm 0; }
         .pt-1, .pt-2 { padding-top: 1mm; }
+        * { letter-spacing: 0.01em; }
       </style>
       </head><body>${el.innerHTML}</body></html>
     `);
@@ -1091,6 +1245,18 @@ export default function POSPage() {
           customerType === "WALK_IN" ? undefined : customerPhone || undefined,
         sessionId: session.id,
       };
+
+      // If this cart was resumed from a hold, void the draft hold order first
+      // (it never deducted stock, so void is safe and purely a status cleanup)
+      if (activeOrderId) {
+        try {
+          await apiPut<any>(`/pos/orders/${activeOrderId}/void`, {
+            reason: "Completed via resume — replaced by new order",
+          });
+        } catch {
+          // Non-fatal: proceed even if the void fails
+        }
+      }
 
       const res = await apiPost<any>("/pos/orders", orderData);
       const order = res.data.order;
@@ -1188,6 +1354,22 @@ export default function POSPage() {
               minute: "2-digit",
             })}
           </div>
+          {/* Held transactions quick-access button */}
+          <button
+            onClick={() => {
+              fetchSuspendedOrders();
+              setShowSuspendPanel(true);
+            }}
+            className={`relative px-3 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-colors ${suspendedOrders.length > 0 ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"}`}
+            title="View held transactions"
+          >
+            <PauseCircle className="w-3 h-3" /> Held
+            {suspendedOrders.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                {suspendedOrders.length}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => setShowCloseSession(true)}
             className="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1"
@@ -1519,13 +1701,22 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="px-4 pb-4">
+            <div className="px-4 pb-4 space-y-2">
               <button
                 onClick={() => setShowPayment(true)}
                 disabled={cart.length === 0}
                 className="w-full bg-amber-400 hover:bg-amber-500 disabled:opacity-40 text-gray-900 font-extrabold py-4 rounded-lg text-lg flex items-center justify-center gap-2 shadow"
               >
                 <CreditCard className="w-5 h-5" /> CHARGE {formatPrice(total)}
+              </button>
+              {/* Suspend button — holds current cart for later */}
+              <button
+                onClick={() => setShowSuspendDialog(true)}
+                disabled={cart.length === 0}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg text-sm flex items-center justify-center gap-2"
+                title="Pause this transaction and start a new one"
+              >
+                <PauseCircle className="w-4 h-4" /> Hold Transaction
               </button>
             </div>
           </div>
@@ -1874,6 +2065,165 @@ export default function POSPage() {
               >
                 <ShoppingCart className="w-4 h-4" /> New Sale
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Suspend Dialog ── */}
+      {showSuspendDialog && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="bg-blue-700 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <PauseCircle className="w-5 h-5" />
+                <h2 className="font-bold text-lg">Hold Transaction</h2>
+              </div>
+              <button onClick={() => setShowSuspendDialog(false)}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                This will pause the current transaction ({cart.length} item
+                {cart.length !== 1 ? "s" : ""}, {formatPrice(total)}) and let
+                you serve another customer. You can resume it at any time from
+                the <strong>Held</strong> queue.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  Optional note (e.g. "Customer checking wallet")
+                </label>
+                <input
+                  type="text"
+                  value={suspendLabel}
+                  onChange={(e) => setSuspendLabel(e.target.value)}
+                  placeholder="Leave blank if not needed"
+                  className="w-full border border-gray-300 px-3 py-2 text-sm rounded focus:outline-none focus:border-blue-500"
+                  onKeyDown={(e) => e.key === "Enter" && handleSuspend()}
+                  autoFocus
+                />
+              </div>
+              <button
+                onClick={handleSuspend}
+                disabled={suspending}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+              >
+                {suspending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <PauseCircle className="w-4 h-4" />
+                )}
+                Hold Transaction
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Suspended Orders Panel ── */}
+      {showSuspendPanel && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="bg-blue-700 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <PauseCircle className="w-5 h-5" />
+                <h2 className="font-bold text-lg">
+                  Held Transactions ({suspendedOrders.length})
+                </h2>
+              </div>
+              <button onClick={() => setShowSuspendPanel(false)}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 max-h-[70vh] overflow-y-auto">
+              {suspendedOrders.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <PauseCircle className="w-12 h-12 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm">No held transactions</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {suspendedOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      className="border border-blue-200 rounded-lg p-4 bg-blue-50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-900 text-sm">
+                            {order.posOrderNumber}
+                          </p>
+                          {order.suspendLabel && (
+                            <p className="text-xs text-blue-700 font-medium mt-0.5">
+                              📝 {order.suspendLabel}
+                            </p>
+                          )}
+                          {order.customerName &&
+                            order.customerName !== "Walk-In Customer" && (
+                              <p className="text-xs text-gray-600 mt-0.5">
+                                👤 {order.customerName}
+                              </p>
+                            )}
+                          <p className="text-xs text-gray-500 mt-1">
+                            {order.items.length} item
+                            {order.items.length !== 1 ? "s" : ""} ·{" "}
+                            <span className="font-semibold text-gray-900">
+                              {formatPrice(order.total)}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            Held at{" "}
+                            {new Date(order.suspendedAt).toLocaleTimeString(
+                              "en-NG",
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                          </p>
+                          {/* Item mini-list */}
+                          <ul className="mt-2 space-y-0.5">
+                            {order.items.slice(0, 3).map((item) => (
+                              <li
+                                key={item.id}
+                                className="text-[10px] text-gray-600 truncate"
+                              >
+                                • {item.productName} ×{item.quantity}
+                              </li>
+                            ))}
+                            {order.items.length > 3 && (
+                              <li className="text-[10px] text-gray-400">
+                                + {order.items.length - 3} more
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                        <button
+                          onClick={() => handleResume(order)}
+                          disabled={!!resuming || cart.length > 0}
+                          className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
+                          title={
+                            cart.length > 0
+                              ? "Clear or hold current cart first"
+                              : "Resume this transaction"
+                          }
+                        >
+                          {resuming === order.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <PlayCircle className="w-3.5 h-3.5" />
+                          )}
+                          Resume
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {cart.length > 0 && suspendedOrders.length > 0 && (
+                <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                  ⚠️ You have an active cart. Hold or clear it before resuming a
+                  transaction.
+                </p>
+              )}
             </div>
           </div>
         </div>
