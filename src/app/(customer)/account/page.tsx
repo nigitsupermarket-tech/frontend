@@ -19,7 +19,10 @@ export default function AccountPage() {
   const { user } = useAuthStore();
   const { logout } = useAuth();
   const isAdmin =
-    user?.role === "ADMIN" || user?.role === "STAFF" || user?.role === "SALES";
+    user?.role === "ADMIN" ||
+    user?.role === "STAFF" ||
+    user?.role === "SALES" ||
+    user?.role === "MANAGER";
 
   const menuItems = [
     {
