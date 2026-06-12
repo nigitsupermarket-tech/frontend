@@ -38,7 +38,7 @@ interface POSOrder {
   id: string;
   posOrderNumber: string;
   receiptNumber: string;
-  status: "COMPLETED" | "VOIDED" | "REFUNDED";
+  status: "OPEN" | "SUSPENDED" | "COMPLETED" | "VOIDED" | "REFUNDED";
   paymentMethod: "CASH" | "CARD" | "TRANSFER" | "SPLIT";
   subtotal: number;
   discountAmount: number;
@@ -68,7 +68,12 @@ const PM_COLORS: Record<string, string> = {
 };
 
 // ── Receipt HTML builder ──────────────────────────────────────────────────────
-function buildReceiptHtml(order: POSOrder): string {
+// `copyLabel`: shown at the bottom of the receipt so cashiers can tell the
+// customer's copy apart from the in-house (merchant) copy at a glance.
+function buildReceiptHtml(
+  order: POSOrder,
+  copyLabel: "CUSTOMER COPY" | "MERCHANT COPY",
+): string {
   const itemsHtml = order.items
     .map((item) => {
       const qtyLabel = item.scaleUnit
@@ -115,6 +120,13 @@ function buildReceiptHtml(order: POSOrder): string {
         border-top: 2px dashed #000;
         padding-top: 2mm; 
       }
+      .copy-tag {
+        display: inline-block;
+        border: 2px solid #000;
+        padding: 1mm 3mm;
+        margin-top: 2mm;
+        letter-spacing: 1px;
+      }
     </style>
   </head><body>
     <div class="c" style="font-size:16px;"><strong>NigitTriple Supermarket</strong></div>
@@ -139,12 +151,16 @@ function buildReceiptHtml(order: POSOrder): string {
       ${order.changeGiven && order.changeGiven > 0 ? `<tr><td><strong>Change</strong></td><td class="r"><strong>&#8358;${order.changeGiven.toLocaleString()}</strong></td></tr>` : ""}
     </table>
     <hr/>
+    <div class="c"><span class="copy-tag">${copyLabel}</span></div>
+    <hr/>
     <div class="c" style="font-size:10px;"><strong>Software by Calstins Ltd · calstins.com</strong></div>
   </body></html>`;
 }
 
 // ── Print via hidden iframe (no popup blocker issues) ────────────────────────
-function printViaIframe(html: string) {
+// `onDone` fires after the print dialog has closed (afterprint) OR after a
+// hard 60s fallback — used to chain a second receipt print.
+function printViaIframe(html: string, onDone?: () => void) {
   // Remove any leftover frame from previous prints
   try {
     const old = document.getElementById("pos-print-frame");
@@ -161,11 +177,16 @@ function printViaIframe(html: string) {
   );
   document.body.appendChild(iframe);
 
+  let finished = false;
   const safeRemove = () => {
     try {
       if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
     } catch (_) {
       /* already removed by HMR or browser — ignore */
+    }
+    if (!finished) {
+      finished = true;
+      onDone?.();
     }
   };
 
@@ -197,6 +218,18 @@ function printViaIframe(html: string) {
   } catch (_) {
     safeRemove();
   }
+}
+
+// ── Print BOTH copies: customer copy first, then merchant (in-house) copy ────
+// The browser print dialog is modal, so the second print is only triggered
+// once the first dialog has been closed (printed/cancelled).
+function printBothReceipts(order: POSOrder) {
+  printViaIframe(buildReceiptHtml(order, "CUSTOMER COPY"), () => {
+    // Small delay so the OS print spooler/dialog has fully cleared
+    setTimeout(() => {
+      printViaIframe(buildReceiptHtml(order, "MERCHANT COPY"));
+    }, 600);
+  });
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -292,6 +325,7 @@ export default function POSOrdersPage() {
             <Monitor className="w-4 h-4" /> Open POS
           </Link>
           <button
+            type="button"
             onClick={fetchOrders}
             className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
           >
@@ -463,7 +497,11 @@ export default function POSOrdersPage() {
                               ? "bg-green-100 text-green-700"
                               : order.status === "VOIDED"
                                 ? "bg-red-100 text-red-700"
-                                : "bg-gray-100 text-gray-700",
+                                : order.status === "SUSPENDED"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : order.status === "OPEN"
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-gray-100 text-gray-700",
                           )}
                         >
                           {order.status}
@@ -472,6 +510,7 @@ export default function POSOrdersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <button
+                            type="button"
                             onClick={() => setSelectedOrder(order)}
                             className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                             title="View details"
@@ -479,11 +518,10 @@ export default function POSOrdersPage() {
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() =>
-                              printViaIframe(buildReceiptHtml(order))
-                            }
+                            type="button"
+                            onClick={() => printBothReceipts(order)}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
-                            title="Print receipt"
+                            title="Print receipt (customer + merchant copy)"
                           >
                             <Printer className="w-4 h-4" />
                           </button>
@@ -505,6 +543,7 @@ export default function POSOrdersPage() {
                     (_, i) => i + 1,
                   ).map((p) => (
                     <button
+                      type="button"
                       key={p}
                       onClick={() => setPage(p)}
                       className={cn(
@@ -530,7 +569,7 @@ export default function POSOrdersPage() {
         createPortal(
           <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
-            style={{ zIndex: 9999 }}
+            style={{ zIndex: 100000 }}
             onClick={(e) => {
               if (e.target === e.currentTarget) setSelectedOrder(null);
             }}
@@ -543,10 +582,11 @@ export default function POSOrdersPage() {
                     {selectedOrder.posOrderNumber}
                   </h3>
                   <p className="text-xs text-gray-500 font-mono">
-                    Receipt: {selectedOrder.receiptNumber}
+                    Receipt: {selectedOrder.receiptNumber || "—"}
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setSelectedOrder(null)}
                   className="p-1 text-gray-400 hover:text-gray-700"
                 >
@@ -607,7 +647,7 @@ export default function POSOrdersPage() {
                     Items
                   </h4>
                   <div className="divide-y divide-gray-100 border border-gray-200 rounded">
-                    {selectedOrder.items.map((item, i) => (
+                    {(selectedOrder.items || []).map((item, i) => (
                       <div
                         key={i}
                         className="flex items-center justify-between px-3 py-2 text-sm"
@@ -670,6 +710,7 @@ export default function POSOrdersPage() {
                       className="w-full border border-red-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-red-400 mb-2"
                     />
                     <button
+                      type="button"
                       onClick={() => handleVoid(selectedOrder.id)}
                       disabled={voiding || !voidReason.trim()}
                       className="w-full py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
@@ -689,14 +730,15 @@ export default function POSOrdersPage() {
               {/* Footer */}
               <div className="border-t p-4 flex gap-3">
                 <button
-                  onClick={() =>
-                    printViaIframe(buildReceiptHtml(selectedOrder))
-                  }
+                  type="button"
+                  onClick={() => printBothReceipts(selectedOrder)}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
+                  title="Prints the customer copy, then the merchant (in-house) copy"
                 >
-                  <Printer className="w-4 h-4" /> Print Receipt
+                  <Printer className="w-4 h-4" /> Print Receipts (2)
                 </button>
                 <button
+                  type="button"
                   onClick={() => setSelectedOrder(null)}
                   className="flex-1 py-2.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 text-sm"
                 >
