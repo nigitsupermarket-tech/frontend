@@ -82,7 +82,15 @@ export default function POSSessionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetchSessions();
@@ -166,9 +174,7 @@ export default function POSSessionsPage() {
                 <div key={session.id}>
                   <button
                     className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 text-left"
-                    onClick={() =>
-                      setExpanded(expanded === session.id ? null : session.id)
-                    }
+                    onClick={() => toggleExpanded(session.id)}
                   >
                     {/* Status dot */}
                     <span
@@ -246,13 +252,13 @@ export default function POSSessionsPage() {
 
                     <ChevronDown
                       className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${
-                        expanded === session.id ? "rotate-180" : ""
+                        expanded.has(session.id) ? "rotate-180" : ""
                       }`}
                     />
                   </button>
 
                   {/* Expanded detail */}
-                  {expanded === session.id && (
+                  {expanded.has(session.id) && (
                     <div className="px-5 pb-5 pt-2 bg-gray-50 border-t border-gray-100">
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm mb-4">
                         <div>
@@ -330,33 +336,46 @@ export default function POSSessionsPage() {
                           </p>
                         ) : (
                           <div className="bg-white rounded border border-gray-200 divide-y divide-gray-100">
-                            {session.recentOrders.map((o) => (
-                              <div
-                                key={o.id}
-                                className="flex items-center justify-between px-3 py-2 text-xs"
-                              >
-                                <div className="min-w-0">
-                                  <p className="font-semibold text-gray-800 truncate">
-                                    {o.posOrderNumber}
-                                  </p>
-                                  <p className="text-gray-400">
-                                    {o.customerName || "Walk-In Customer"} ·{" "}
-                                    {new Date(o.createdAt).toLocaleTimeString(
-                                      "en-NG",
-                                      { hour: "2-digit", minute: "2-digit" },
-                                    )}
-                                  </p>
+                            {session.recentOrders.map((o, i) => {
+                              let timeLabel = "—";
+                              try {
+                                if (o?.createdAt) {
+                                  timeLabel = new Date(
+                                    o.createdAt,
+                                  ).toLocaleTimeString("en-NG", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  });
+                                }
+                              } catch {
+                                timeLabel = "—";
+                              }
+                              const amount = Number(o?.total) || 0;
+                              return (
+                                <div
+                                  key={o?.id || `${session.id}-tx-${i}`}
+                                  className="flex items-center justify-between px-3 py-2 text-xs"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-gray-800 truncate">
+                                      {o?.posOrderNumber || "—"}
+                                    </p>
+                                    <p className="text-gray-400">
+                                      {o?.customerName || "Walk-In Customer"} ·{" "}
+                                      {timeLabel}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-3 flex-shrink-0">
+                                    <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
+                                      {o?.paymentMethod || "—"}
+                                    </span>
+                                    <span className="font-bold text-gray-900">
+                                      {formatPrice(amount)}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-3 flex-shrink-0">
-                                  <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
-                                    {o.paymentMethod}
-                                  </span>
-                                  <span className="font-bold text-gray-900">
-                                    {formatPrice(o.total)}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
