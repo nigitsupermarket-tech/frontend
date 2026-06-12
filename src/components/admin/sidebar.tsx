@@ -64,7 +64,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Products",
     icon: Package,
-    roles: ["ADMIN", "STAFF", "SALES"],
+    roles: ["ADMIN", "STAFF", "SALES", "MANAGER"],
     children: [
       { label: "All Products", href: "/admin/products" },
       { label: "Add Product", href: "/admin/products/new" },
@@ -110,13 +110,13 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: "Reviews",
     href: "/admin/reviews",
     icon: Star,
-    roles: ["ADMIN", "STAFF"],
+    roles: ["ADMIN", "STAFF", "MANAGER"],
   },
 
   {
     label: "Inbox",
     icon: Inbox,
-    roles: ["ADMIN", "STAFF"],
+    roles: ["ADMIN", "STAFF", "MANAGER"],
     children: [
       { label: "Contact Messages", href: "/admin/inbox/contacts" },
       { label: "Subscribers", href: "/admin/inbox/subscribers" },
@@ -137,7 +137,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Shipping",
     icon: Truck,
-    roles: ["ADMIN", "STAFF"],
+    roles: ["ADMIN", "STAFF", "MANAGER"],
     children: [
       { label: "Overview", href: "/admin/shipping" },
       { label: "Ready to Ship", href: "/admin/shipping/ready" },
@@ -169,7 +169,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Blog",
     icon: BookOpen,
-    roles: ["ADMIN", "STAFF"],
+    roles: ["ADMIN", "STAFF", "MANAGER"],
     children: [
       { label: "All Posts", href: "/admin/blog" },
       { label: "New Post", href: "/admin/blog/new" },
@@ -301,15 +301,20 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   // Apply role-specific child filtering
   visibleItems = visibleItems.map((item) => {
-    // Customers: STAFF and SALES cannot see User Management
+    // Customers: STAFF and SALES cannot see User Management.
+    // MANAGER and ADMIN can.
     if (item.label === "Customers" && (role === "STAFF" || role === "SALES")) {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "User Management"),
       };
     }
-    // POS Sessions: only ADMIN
-    if (item.label === "Point of Sale" && role !== "ADMIN") {
+    // POS Sessions: ADMIN and MANAGER only
+    if (
+      item.label === "Point of Sale" &&
+      role !== "ADMIN" &&
+      role !== "MANAGER"
+    ) {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "POS Sessions"),
@@ -341,6 +346,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        {role === "MANAGER" && (
+          <div className="px-3 py-1.5 mb-2 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-lg">
+            Manager
+          </div>
+        )}
         {role === "SALES" && (
           <div className="px-3 py-1.5 mb-2 bg-blue-50 text-blue-700 text-xs font-semibold rounded-lg">
             Sales Manager

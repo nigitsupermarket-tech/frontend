@@ -24,6 +24,15 @@ interface POSSession {
   notes?: string;
   status: string;
   staff?: { name: string; email: string; role: string };
+  recentOrders?: {
+    id: string;
+    posOrderNumber: string;
+    receiptNumber?: string;
+    total: number;
+    paymentMethod: string;
+    customerName?: string;
+    createdAt: string;
+  }[];
 }
 
 function VarianceBadge({ variance }: { variance: number | undefined }) {
@@ -292,10 +301,57 @@ export default function POSSessionsPage() {
                         )}
                       </div>
                       {session.notes && (
-                        <p className="text-xs text-gray-500 bg-white rounded border border-gray-200 px-3 py-2">
+                        <p className="text-xs text-gray-500 bg-white rounded border border-gray-200 px-3 py-2 mb-4">
                           {session.notes}
                         </p>
                       )}
+
+                      {/* Recent transactions for this session */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                          Transactions{" "}
+                          {session.recentOrders &&
+                          session.recentOrders.length > 0
+                            ? `(latest ${session.recentOrders.length})`
+                            : ""}
+                        </p>
+                        {!session.recentOrders ||
+                        session.recentOrders.length === 0 ? (
+                          <p className="text-xs text-gray-400 bg-white rounded border border-gray-200 px-3 py-4 text-center">
+                            No transactions recorded for this session yet.
+                          </p>
+                        ) : (
+                          <div className="bg-white rounded border border-gray-200 divide-y divide-gray-100">
+                            {session.recentOrders.map((o) => (
+                              <div
+                                key={o.id}
+                                className="flex items-center justify-between px-3 py-2 text-xs"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-gray-800 truncate">
+                                    {o.posOrderNumber}
+                                  </p>
+                                  <p className="text-gray-400">
+                                    {o.customerName || "Walk-In Customer"} ·{" "}
+                                    {new Date(o.createdAt).toLocaleTimeString(
+                                      "en-NG",
+                                      { hour: "2-digit", minute: "2-digit" },
+                                    )}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-3 flex-shrink-0">
+                                  <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
+                                    {o.paymentMethod}
+                                  </span>
+                                  <span className="font-bold text-gray-900">
+                                    {formatPrice(o.total)}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
