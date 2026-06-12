@@ -7,7 +7,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string;
-  role: "CUSTOMER" | "STAFF" | "ADMIN" | "SALES";
+  role: "CUSTOMER" | "STAFF" | "ADMIN" | "SALES" | "MANAGER";
   image?: string;
   emailVerified: boolean;
   customerSegment?: string;
@@ -143,12 +143,12 @@ export interface Product {
 
   // ── Scalable / weighted product ──
   isScalable?: boolean;
-  scaleUnit?: string;        // e.g. "kg", "L", "cup", "custom"
-  pricePerUnit?: number;     // price per 1 unit
-  minOrderQty?: number;      // e.g. 0.1
-  maxOrderQty?: number;      // e.g. 10
-  scaleStep?: number;        // e.g. 0.1
-  scalePresets?: number[];   // e.g. [0.5, 1, 1.5, 2, 3]
+  scaleUnit?: string; // e.g. "kg", "L", "cup", "custom"
+  pricePerUnit?: number; // price per 1 unit
+  minOrderQty?: number; // e.g. 0.1
+  maxOrderQty?: number; // e.g. 10
+  scaleStep?: number; // e.g. 0.1
+  scalePresets?: number[]; // e.g. [0.5, 1, 1.5, 2, 3]
 
   // Timestamps
   createdAt: string;

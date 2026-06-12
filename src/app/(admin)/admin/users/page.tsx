@@ -6,6 +6,7 @@ import { User } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatDate } from "@/lib/utils";
+import { useAuthStore } from "@/store/authStore";
 import {
   TableRowSkeleton,
   EmptyState,
@@ -13,11 +14,14 @@ import {
 
 const roleColors: Record<string, string> = {
   ADMIN: "bg-red-100 text-red-700",
+  MANAGER: "bg-emerald-100 text-emerald-700",
   STAFF: "bg-purple-100 text-purple-700",
   SALES: "bg-blue-100 text-blue-700",
 };
 
 export default function AdminUsersPage() {
+  const { user: currentUser } = useAuthStore();
+  const isManager = currentUser?.role === "MANAGER";
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -35,18 +39,20 @@ export default function AdminUsersPage() {
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      // Fetch ADMIN and STAFF users separately and merge, since the API
-      // may not support comma-separated role values
-      const [adminRes, staffRes, salesRes] = await Promise.all([
-        apiGet<any>("/users", { role: "ADMIN", limit: "100" }),
-        apiGet<any>("/users", { role: "STAFF", limit: "100" }),
-        apiGet<any>("/users", { role: "SALES", limit: "100" }),
-      ]);
-      const merged = [
-        ...(adminRes.data.users || []),
-        ...(staffRes.data.users || []),
-        ...(salesRes.data.users || []),
-      ];
+      // Fetch each role separately and merge, since the API may not
+      // support comma-separated role values.
+      // MANAGER never sees ADMIN accounts — the backend also enforces this,
+      // but we skip the request entirely here too.
+      const roleQueries = isManager
+        ? ["MANAGER", "STAFF", "SALES"]
+        : ["ADMIN", "MANAGER", "STAFF", "SALES"];
+
+      const results = await Promise.all(
+        roleQueries.map((role) =>
+          apiGet<any>("/users", { role, limit: "100" }),
+        ),
+      );
+      const merged = results.flatMap((r) => r.data.users || []);
       // Deduplicate by id
       const unique = merged.filter(
         (u, i, arr) => arr.findIndex((x) => x.id === u.id) === i,
@@ -193,8 +199,10 @@ export default function AdminUsersPage() {
                 className={inputCls + " bg-white"}
               >
                 <option value="STAFF">Staff</option>
-                <option value="ADMIN">Admin</option>
                 <option value="SALES">Sales Manager</option>
+                <option value="MANAGER">Manager</option>
+                {/* Managers cannot assign or see the ADMIN role */}
+                {!isManager && <option value="ADMIN">Admin</option>}
               </select>
             </div>
             {!editItem && (

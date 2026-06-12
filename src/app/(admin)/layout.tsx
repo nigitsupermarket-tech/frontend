@@ -8,7 +8,7 @@ import { AdminHeader } from "@/components/admin/header";
 import { SidebarProvider } from "@/components/admin/sidebar-context";
 import { PageLoader } from "@/components/shared/loading-spinner";
 
-const ALLOWED_ROLES = ["ADMIN", "STAFF", "SALES"];
+const ALLOWED_ROLES = ["ADMIN", "STAFF", "SALES", "MANAGER"];
 
 export default function AdminLayout({
   children,
