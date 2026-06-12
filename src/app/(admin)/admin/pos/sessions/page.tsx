@@ -10,7 +10,7 @@ import { formatPrice } from "@/lib/utils";
 interface POSSession {
   id: string;
   staffId: string;
-  openedAt: string;
+  openedAt: string | null;
   closedAt?: string;
   openingFloat: number;
   closingFloat?: number;
@@ -175,7 +175,9 @@ export default function POSSessionsPage() {
                       className={`w-2 h-2 rounded-full flex-shrink-0 ${
                         session.status === "OPEN"
                           ? "bg-green-500"
-                          : "bg-gray-300"
+                          : session.status === "NO_SESSION"
+                            ? "bg-gray-200"
+                            : "bg-gray-300"
                       }`}
                     />
 
@@ -188,10 +190,14 @@ export default function POSSessionsPage() {
                           className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             session.status === "OPEN"
                               ? "bg-green-100 text-green-700"
-                              : "bg-gray-100 text-gray-500"
+                              : session.status === "NO_SESSION"
+                                ? "bg-gray-50 text-gray-400"
+                                : "bg-gray-100 text-gray-500"
                           }`}
                         >
-                          {session.status}
+                          {session.status === "NO_SESSION"
+                            ? "NO SESSION"
+                            : session.status}
                         </span>
                       </p>
                       {secondary && (
@@ -200,10 +206,12 @@ export default function POSSessionsPage() {
                         </p>
                       )}
                       <p className="text-xs text-gray-400 mt-0.5 pl-5">
-                        {new Date(session.openedAt).toLocaleString("en-NG", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
+                        {session.openedAt
+                          ? new Date(session.openedAt).toLocaleString("en-NG", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })
+                          : "Has never opened a POS session"}
                         {session.closedAt &&
                           ` → ${new Date(session.closedAt).toLocaleTimeString(
                             "en-NG",
