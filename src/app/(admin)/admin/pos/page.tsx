@@ -1128,6 +1128,12 @@ export default function POSPage() {
   };
 
   // ── Print receipt from checkout modal using iframe (avoids printing full page) ──
+  // NOTE: We use a Blob URL assigned to `iframe.src` rather than
+  // `doc.write()`. With doc.write, the iframe's `load` event has typically
+  // already fired (for the initial about:blank doc) by the time `onload` is
+  // attached — it "works" on the very first print of a page session by luck,
+  // but `onload` never re-fires on subsequent prints, so nothing happens.
+  // A Blob URL reliably fires `load` every time.
   const printCurrentReceipt = () => {
     const el = document.getElementById("receipt-content");
     if (!el) return;
@@ -1135,16 +1141,7 @@ export default function POSPage() {
     const existing = document.getElementById("pos-receipt-print-frame");
     if (existing) existing.remove();
 
-    const iframe = document.createElement("iframe");
-    iframe.id = "pos-receipt-print-frame";
-    iframe.style.cssText =
-      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:297mm;border:none;";
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(`
+    const html = `
       <!DOCTYPE html><html><head>
       <style>
         @page { size: 80mm auto; margin: 0; }
@@ -1169,23 +1166,45 @@ export default function POSPage() {
         * { letter-spacing: 0.01em; }
       </style>
       </head><body>${el.innerHTML}</body></html>
-    `);
-    doc.close();
+    `;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "pos-receipt-print-frame";
+    iframe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:297mm;border:none;";
+
+    const cleanup = () => {
+      try {
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch (_) {
+        /* ignore */
+      }
+    };
 
     iframe.onload = () => {
       setTimeout(() => {
         const win = iframe.contentWindow;
-        if (!win) return;
+        if (!win) {
+          cleanup();
+          return;
+        }
         win.focus();
-        win.addEventListener("afterprint", () => {
-          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-        });
+        win.addEventListener("afterprint", cleanup, { once: true });
         win.print();
-        setTimeout(() => {
-          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-        }, 30_000);
+        setTimeout(cleanup, 30_000);
       }, 300);
     };
+
+    iframe.src = blobUrl;
+    document.body.appendChild(iframe);
   };
 
   const processPayment = async () => {

@@ -158,8 +158,16 @@ function buildReceiptHtml(
 }
 
 // ── Print via hidden iframe (no popup blocker issues) ────────────────────────
+// IMPORTANT: We load the receipt via a Blob URL (`iframe.src`) rather than
+// `document.write()`. With `document.write()`, the iframe's `load` event has
+// already fired (for the initial about:blank document) by the time we attach
+// `iframe.onload` — this works "by luck" on the very first call of a page
+// session, but on subsequent calls the browser doesn't re-fire `load`, so the
+// print is silently never triggered. A Blob URL assigned to `src` reliably
+// fires `load` every single time.
+//
 // `onDone` fires after the print dialog has closed (afterprint) OR after a
-// hard 60s fallback — used to chain a second receipt print.
+// hard fallback — used to chain a second receipt print.
 function printViaIframe(html: string, onDone?: () => void) {
   // Remove any leftover frame from previous prints
   try {
@@ -169,20 +177,27 @@ function printViaIframe(html: string, onDone?: () => void) {
     /* ignore */
   }
 
+  const blob = new Blob([html], { type: "text/html" });
+  const blobUrl = URL.createObjectURL(blob);
+
   const iframe = document.createElement("iframe");
   iframe.id = "pos-print-frame";
   iframe.setAttribute(
     "style",
     "position:fixed;top:-9999px;left:-9999px;width:80mm;height:200mm;border:none;visibility:hidden;",
   );
-  document.body.appendChild(iframe);
 
   let finished = false;
-  const safeRemove = () => {
+  const cleanup = () => {
     try {
       if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
     } catch (_) {
-      /* already removed by HMR or browser — ignore */
+      /* already removed — ignore */
+    }
+    try {
+      URL.revokeObjectURL(blobUrl);
+    } catch (_) {
+      /* ignore */
     }
     if (!finished) {
       finished = true;
@@ -190,34 +205,28 @@ function printViaIframe(html: string, onDone?: () => void) {
     }
   };
 
-  try {
-    const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
-    if (!doc) {
-      safeRemove();
-      return;
-    }
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          const win = iframe.contentWindow;
-          if (!win) return;
-          win.focus();
-          win.addEventListener("afterprint", safeRemove, { once: true });
-          win.print();
-        } catch (_) {
-          safeRemove();
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        const win = iframe.contentWindow;
+        if (!win) {
+          cleanup();
+          return;
         }
-        // Hard fallback after 60s
-        setTimeout(safeRemove, 60_000);
-      }, 400);
-    };
-  } catch (_) {
-    safeRemove();
-  }
+        win.focus();
+        win.addEventListener("afterprint", cleanup, { once: true });
+        win.print();
+      } catch (_) {
+        cleanup();
+        return;
+      }
+      // Hard fallback in case `afterprint` never fires (some browsers)
+      setTimeout(cleanup, 60_000);
+    }, 250);
+  };
+
+  iframe.src = blobUrl;
+  document.body.appendChild(iframe);
 }
 
 // ── Print BOTH copies: customer copy first, then merchant (in-house) copy ────
