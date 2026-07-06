@@ -17,6 +17,7 @@ const roleColors: Record<string, string> = {
   MANAGER: "bg-emerald-100 text-emerald-700",
   STAFF: "bg-purple-100 text-purple-700",
   SALES: "bg-blue-100 text-blue-700",
+  ACCOUNTANT: "bg-teal-100 text-teal-700",
 };
 
 export default function AdminUsersPage() {
@@ -44,8 +45,8 @@ export default function AdminUsersPage() {
       // MANAGER never sees ADMIN accounts — the backend also enforces this,
       // but we skip the request entirely here too.
       const roleQueries = isManager
-        ? ["MANAGER", "STAFF", "SALES"]
-        : ["ADMIN", "MANAGER", "STAFF", "SALES"];
+        ? ["MANAGER", "STAFF", "SALES", "ACCOUNTANT"]
+        : ["ADMIN", "MANAGER", "STAFF", "SALES", "ACCOUNTANT"];
 
       const results = await Promise.all(
         roleQueries.map((role) =>
@@ -201,6 +202,7 @@ export default function AdminUsersPage() {
                 <option value="STAFF">Staff</option>
                 <option value="SALES">Sales Manager</option>
                 <option value="MANAGER">Manager</option>
+                <option value="ACCOUNTANT">Accountant</option>
                 {/* Managers cannot assign or see the ADMIN role */}
                 {!isManager && <option value="ADMIN">Admin</option>}
               </select>

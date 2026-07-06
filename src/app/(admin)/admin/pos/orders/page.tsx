@@ -166,9 +166,45 @@ function buildReceiptHtml(
 // print is silently never triggered. A Blob URL assigned to `src` reliably
 // fires `load` every single time.
 //
-// `onDone` fires after the print dialog has closed (afterprint) OR after a
-// hard fallback — used to chain a second receipt print.
+// BUG FIX ("print stops working after frequent clicks"): two things were
+// happening together:
+//   1. `afterprint` was only listened for on the iframe's OWN window
+//      (`iframe.contentWindow`). Several browsers only ever dispatch
+//      `afterprint` on the TOP-level window when printing was triggered
+//      from an embedded iframe, so that listener silently never fired.
+//      Cleanup then only ever ran via the 60s hard-fallback timer, so
+//      leftover iframes/object URLs piled up under rapid clicking.
+//   2. Nothing serialized overlapping print calls — clicking Print several
+//      times quickly could kick off several `window.print()` calls before
+//      the previous print dialog had closed, which is what made printing
+//      appear to "stop entirely" after a few rapid clicks (the browser just
+//      stops responding to further print() calls while one is already
+//      pending in some engines).
+//
+// Fix: a small FIFO queue processes one print job at a time, and cleanup
+// listens on BOTH the top window and the iframe window (whichever fires
+// first wins), with the fallback timer properly cleared once done.
+let printQueue: Array<{ html: string; onDone?: () => void }> = [];
+let printBusy = false;
+
+function runNextPrintJob() {
+  if (printBusy) return;
+  const job = printQueue.shift();
+  if (!job) return;
+  printBusy = true;
+  printViaIframeInternal(job.html, () => {
+    printBusy = false;
+    job.onDone?.();
+    runNextPrintJob();
+  });
+}
+
 function printViaIframe(html: string, onDone?: () => void) {
+  printQueue.push({ html, onDone });
+  runNextPrintJob();
+}
+
+function printViaIframeInternal(html: string, onDone: () => void) {
   // Remove any leftover frame from previous prints
   try {
     const old = document.getElementById("pos-print-frame");
@@ -188,7 +224,25 @@ function printViaIframe(html: string, onDone?: () => void) {
   );
 
   let finished = false;
+  let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
   const cleanup = () => {
+    if (finished) return;
+    finished = true;
+    if (fallbackTimer) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+    }
+    try {
+      window.removeEventListener("afterprint", cleanup);
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      iframe.contentWindow?.removeEventListener("afterprint", cleanup);
+    } catch (_) {
+      /* ignore */
+    }
     try {
       if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
     } catch (_) {
@@ -199,10 +253,7 @@ function printViaIframe(html: string, onDone?: () => void) {
     } catch (_) {
       /* ignore */
     }
-    if (!finished) {
-      finished = true;
-      onDone?.();
-    }
+    onDone();
   };
 
   iframe.onload = () => {
@@ -214,14 +265,18 @@ function printViaIframe(html: string, onDone?: () => void) {
           return;
         }
         win.focus();
+        // Listen on BOTH the top window and the iframe's window — different
+        // browsers dispatch `afterprint` to different targets when the
+        // print was triggered from an iframe. First one to fire wins.
+        window.addEventListener("afterprint", cleanup, { once: true });
         win.addEventListener("afterprint", cleanup, { once: true });
         win.print();
       } catch (_) {
         cleanup();
         return;
       }
-      // Hard fallback in case `afterprint` never fires (some browsers)
-      setTimeout(cleanup, 60_000);
+      // Hard fallback in case `afterprint` never fires on either target
+      fallbackTimer = setTimeout(cleanup, 15_000);
     }, 250);
   };
 
@@ -232,11 +287,11 @@ function printViaIframe(html: string, onDone?: () => void) {
 // ── Print BOTH copies: customer copy first, then merchant (in-house) copy ────
 // The browser print dialog is modal, so the second print is only triggered
 // once the first dialog has been closed (printed/cancelled).
-function printBothReceipts(order: POSOrder) {
+function printBothReceipts(order: POSOrder, onAllDone?: () => void) {
   printViaIframe(buildReceiptHtml(order, "CUSTOMER COPY"), () => {
     // Small delay so the OS print spooler/dialog has fully cleared
     setTimeout(() => {
-      printViaIframe(buildReceiptHtml(order, "MERCHANT COPY"));
+      printViaIframe(buildReceiptHtml(order, "MERCHANT COPY"), onAllDone);
     }, 600);
   });
 }
@@ -262,6 +317,15 @@ export default function POSOrdersPage() {
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
   const [mounted, setMounted] = useState(false);
+  // Guards against spam-clicking Print: tracks which order is currently
+  // printing so its button can be disabled until the job finishes.
+  const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
+
+  const handlePrint = (order: POSOrder) => {
+    if (printingOrderId) return; // already printing something — ignore extra clicks
+    setPrintingOrderId(order.id);
+    printBothReceipts(order, () => setPrintingOrderId(null));
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -528,11 +592,16 @@ export default function POSOrdersPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => printBothReceipts(order)}
-                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                            onClick={() => handlePrint(order)}
+                            disabled={printingOrderId === order.id}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Print receipt (customer + merchant copy)"
                           >
-                            <Printer className="w-4 h-4" />
+                            {printingOrderId === order.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Printer className="w-4 h-4" />
+                            )}
                           </button>
                         </div>
                       </td>
@@ -740,11 +809,17 @@ export default function POSOrdersPage() {
               <div className="border-t p-4 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => printBothReceipts(selectedOrder)}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
+                  onClick={() => handlePrint(selectedOrder)}
+                  disabled={printingOrderId === selectedOrder.id}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Prints the customer copy, then the merchant (in-house) copy"
                 >
-                  <Printer className="w-4 h-4" /> Print Receipts (2)
+                  {printingOrderId === selectedOrder.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Printer className="w-4 h-4" />
+                  )}{" "}
+                  Print Receipts (2)
                 </button>
                 <button
                   type="button"

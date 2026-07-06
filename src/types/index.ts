@@ -7,7 +7,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string;
-  role: "CUSTOMER" | "STAFF" | "ADMIN" | "SALES" | "MANAGER";
+  role: "CUSTOMER" | "STAFF" | "ADMIN" | "SALES" | "MANAGER" | "ACCOUNTANT";
   image?: string;
   emailVerified: boolean;
   customerSegment?: string;
@@ -574,5 +574,5 @@ export type PaymentStatus =
   | "REFUNDED";
 export type StockStatus = "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
 export type ProductStatus = "ACTIVE" | "INACTIVE" | "DRAFT";
-export type UserRole = "CUSTOMER" | "STAFF" | "ADMIN";
+export type UserRole = "CUSTOMER" | "STAFF" | "ADMIN" | "SALES" | "MANAGER" | "ACCOUNTANT";
 export type BlogStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";

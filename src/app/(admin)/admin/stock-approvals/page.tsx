@@ -70,9 +70,16 @@ export default function StockApprovalsPage() {
   const { user } = useAuthStore();
   const router = useRouter();
 
-  // Guard — admin only
+  // Guard — only Admin can act on requests now; Manager & Accountant get
+  // read-only visibility into the same history. Everyone else is
+  // redirected away.
+  const canView = ["ADMIN", "MANAGER", "ACCOUNTANT"].includes(
+    user?.role || "",
+  );
+  const canAction = user?.role === "ADMIN";
+
   useEffect(() => {
-    if (user && user.role !== "ADMIN") router.replace("/admin/dashboard");
+    if (user && !canView) router.replace("/admin/dashboard");
   }, [user]);
 
   const fetchRequests = useCallback(
@@ -193,7 +200,9 @@ export default function StockApprovalsPage() {
             Stock Approval Requests
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Review and approve stock changes submitted by staff
+            {canAction
+              ? "Review and approve stock changes submitted by staff"
+              : "Full history of stock changes and approvals (read-only)"}
           </p>
         </div>
         <button
@@ -262,7 +271,7 @@ export default function StockApprovalsPage() {
       </div>
 
       {/* Bulk actions bar */}
-      {filters.status === "PENDING" && pendingRequests.length > 0 && (
+      {canAction && filters.status === "PENDING" && pendingRequests.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-wrap items-center gap-4">
           <button
             onClick={toggleAll}
@@ -382,7 +391,7 @@ export default function StockApprovalsPage() {
                       key={req.id}
                       className={`border-b border-gray-50 transition-colors ${isSelected ? "bg-amber-50/50" : "hover:bg-gray-50/30"}`}
                     >
-                      {filters.status === "PENDING" && (
+                      {canAction && filters.status === "PENDING" && (
                         <td className="px-4 py-3">
                           {isPending && (
                             <button onClick={() => toggleSelect(req.id)}>
@@ -479,7 +488,7 @@ export default function StockApprovalsPage() {
                       </td>
 
                       {/* Actions */}
-                      {filters.status === "PENDING" && (
+                      {canAction && filters.status === "PENDING" && (
                         <td className="px-4 py-3">
                           {isPending && (
                             <div className="flex items-center justify-end gap-1.5">

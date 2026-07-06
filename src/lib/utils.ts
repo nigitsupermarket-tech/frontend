@@ -20,6 +20,25 @@ export function formatPrice(amount: number): string {
   return `₦${amount.toLocaleString("en-NG")}`;
 }
 
+// ─── Abbreviated currency (for dashboard/stat cards where full figures
+// would overflow or look cluttered, e.g. ₦8,481,585 → ₦8.48M) ───────────────
+// Keeps 2 sig-figs after the decimal for readability, drops trailing ".00".
+export function formatPriceCompact(amount: number): string {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+
+  const abbreviate = (value: number, suffix: string) => {
+    const str = (value).toFixed(2).replace(/\.?0+$/, "");
+    return `${sign}₦${str}${suffix}`;
+  };
+
+  if (abs >= 1_000_000_000) return abbreviate(abs / 1_000_000_000, "B");
+  if (abs >= 1_000_000) return abbreviate(abs / 1_000_000, "M");
+  if (abs >= 100_000) return abbreviate(abs / 1_000, "K");
+  // Below ₦100K, the full figure is short enough to just show as-is.
+  return formatPrice(amount);
+}
+
 // ─── Date formatting ─────────────────────────────────────────────────────────
 export function formatDate(
   dateStr: string | Date,

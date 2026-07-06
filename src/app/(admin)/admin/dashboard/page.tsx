@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { ActivityWidget } from "@/components/admin/activity-widget";
-import { formatPrice, formatNumber } from "@/lib/utils";
+import { formatPrice, formatPriceCompact, formatNumber } from "@/lib/utils";
 import { Skeleton } from "@/components/shared/loading-spinner";
 import {
   LineChart,
@@ -44,6 +44,7 @@ function StatCard({
   trend,
   color,
   href,
+  fullValue,
 }: {
   title: string;
   value: string;
@@ -52,6 +53,9 @@ function StatCard({
   trend?: number;
   color: string;
   href?: string;
+  // Exact (non-abbreviated) figure shown as a native tooltip when `value`
+  // is a compact/abbreviated string like "₦8.48M".
+  fullValue?: string;
 }) {
   const inner = (
     <div className="bg-white rounded-2xl border border-gray-100 p-5 hover:shadow-sm transition-shadow h-full">
@@ -60,7 +64,12 @@ function StatCard({
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
             {title}
           </p>
-          <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
+          <p
+            className="mt-2 text-2xl font-bold text-gray-900"
+            title={fullValue}
+          >
+            {value}
+          </p>
           {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
         </div>
         <div
@@ -135,7 +144,8 @@ function StaffDashboard({ data }: { data: any }) {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           title="Sales Today"
-          value={formatPrice(staff.today.sales)}
+          value={formatPriceCompact(staff.today.sales)}
+          fullValue={formatPrice(staff.today.sales)}
           sub={`${staff.today.orders} orders`}
           icon={DollarSign}
           color="bg-green-50 text-green-600"
@@ -148,7 +158,8 @@ function StaffDashboard({ data }: { data: any }) {
         />
         <StatCard
           title="This Month"
-          value={formatPrice(staff.thisMonth.sales)}
+          value={formatPriceCompact(staff.thisMonth.sales)}
+          fullValue={formatPrice(staff.thisMonth.sales)}
           sub={`${staff.thisMonth.orders} orders`}
           icon={BarChart2}
           color="bg-purple-50 text-purple-600"
@@ -157,7 +168,7 @@ function StaffDashboard({ data }: { data: any }) {
           title="Avg Order Today"
           value={
             staff.today.orders > 0
-              ? formatPrice(staff.today.sales / staff.today.orders)
+              ? formatPriceCompact(staff.today.sales / staff.today.orders)
               : "₦0"
           }
           icon={Award}
@@ -171,7 +182,8 @@ function StaffDashboard({ data }: { data: any }) {
         />
         <StatCard
           title="All-Time Sales"
-          value={formatPrice(staff.allTime.sales)}
+          value={formatPriceCompact(staff.allTime.sales)}
+          fullValue={formatPrice(staff.allTime.sales)}
           icon={Store}
           color="bg-indigo-50 text-indigo-600"
         />
@@ -226,13 +238,15 @@ function SalesDashboard({ data, chart }: { data: any; chart: any[] }) {
         />
         <StatCard
           title="Online Revenue (Month)"
-          value={formatPrice(data.onlineRevenue.thisMonth)}
+          value={formatPriceCompact(data.onlineRevenue.thisMonth)}
+          fullValue={formatPrice(data.onlineRevenue.thisMonth)}
           icon={DollarSign}
           color="bg-green-50 text-green-600"
         />
         <StatCard
           title="POS Revenue (Month)"
-          value={formatPrice(data.posRevenue.thisMonth)}
+          value={formatPriceCompact(data.posRevenue.thisMonth)}
+          fullValue={formatPrice(data.posRevenue.thisMonth)}
           sub={`${data.posOrders.today} POS orders today`}
           icon={Store}
           color="bg-purple-50 text-purple-600"
@@ -240,7 +254,8 @@ function SalesDashboard({ data, chart }: { data: any; chart: any[] }) {
         />
         <StatCard
           title="POS Today"
-          value={formatPrice(data.posRevenue.today)}
+          value={formatPriceCompact(data.posRevenue.today)}
+          fullValue={formatPrice(data.posRevenue.today)}
           icon={BarChart2}
           color="bg-amber-50 text-amber-600"
         />
@@ -264,7 +279,10 @@ function SalesDashboard({ data, chart }: { data: any; chart: any[] }) {
         />
         <StatCard
           title="Combined Revenue"
-          value={formatPrice(
+          value={formatPriceCompact(
+            data.onlineRevenue.thisMonth + data.posRevenue.thisMonth,
+          )}
+          fullValue={formatPrice(
             data.onlineRevenue.thisMonth + data.posRevenue.thisMonth,
           )}
           sub="Online + POS this month"
@@ -384,29 +402,33 @@ function AdminDashboard({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Online Revenue (Month)"
-          value={formatPrice(data.revenue.thisMonth)}
+          value={formatPriceCompact(data.revenue.thisMonth)}
+          fullValue={formatPrice(data.revenue.thisMonth)}
           trend={data.revenue.growth}
           icon={DollarSign}
           color="bg-green-50 text-green-600"
         />
         <StatCard
           title="POS Revenue (Month)"
-          value={formatPrice(data.revenue.thisMonthPOS)}
+          value={formatPriceCompact(data.revenue.thisMonthPOS)}
+          fullValue={formatPrice(data.revenue.thisMonthPOS)}
           icon={Store}
           color="bg-blue-50 text-blue-600"
           href="/admin/pos/orders"
         />
         <StatCard
           title="Combined Revenue"
-          value={formatPrice(data.revenue.combinedThisMonth)}
+          value={formatPriceCompact(data.revenue.combinedThisMonth)}
+          fullValue={formatPrice(data.revenue.combinedThisMonth)}
           sub="Online + POS this month"
           icon={BarChart2}
           color="bg-purple-50 text-purple-600"
         />
         <StatCard
           title="Total Revenue"
-          value={formatPrice(data.revenue.total)}
-          sub={`₦${((data.revenue.allTimePOS || 0) / 1000).toFixed(0)}k via POS`}
+          value={formatPriceCompact(data.revenue.total)}
+          fullValue={formatPrice(data.revenue.total)}
+          sub={`${formatPriceCompact(data.revenue.allTimePOS || 0)} via POS`}
           icon={Award}
           color="bg-amber-50 text-amber-600"
         />
@@ -440,7 +462,7 @@ function AdminDashboard({
         <StatCard
           title="POS Today"
           value={formatNumber(data.pos.ordersToday)}
-          sub={formatPrice(data.pos.salesToday)}
+          sub={formatPriceCompact(data.pos.salesToday)}
           icon={Store}
           color="bg-teal-50 text-teal-600"
           href="/admin/pos"

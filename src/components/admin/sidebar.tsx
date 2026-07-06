@@ -31,6 +31,7 @@ import {
   Zap,
   CheckCircle,
   ClipboardCheck,
+  FileText,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Point of Sale",
     icon: Monitor,
+    roles: ["ADMIN", "STAFF", "SALES", "MANAGER"],
     children: [
       { label: "🖥️ Open POS", href: "/admin/pos" },
       { label: "POS Orders", href: "/admin/pos/orders" },
@@ -85,6 +87,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Online Orders",
     icon: ShoppingCart,
+    roles: ["ADMIN", "STAFF", "SALES", "MANAGER"],
     children: [{ label: "All Orders", href: "/admin/orders" }],
   },
 
@@ -92,6 +95,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     // Customers: STAFF sees only All Customers; SALES same; ADMIN sees both
     label: "Customers",
     icon: Users,
+    roles: ["ADMIN", "STAFF", "SALES", "MANAGER"],
     children: [
       { label: "All Customers", href: "/admin/customers" },
       { label: "User Management", href: "/admin/users" },
@@ -99,11 +103,22 @@ const ALL_NAV_ITEMS: NavItem[] = [
   },
 
   {
-    // Stock Approvals — ADMIN only
+    // Stock Approvals — ADMIN & MANAGER can act on requests; ACCOUNTANT
+    // gets read-only visibility into the approval history (action buttons
+    // are hidden for ACCOUNTANT inside the page itself).
     label: "Stock Approvals",
     href: "/admin/stock-approvals",
     icon: ClipboardCheck,
-    roles: ["ADMIN"],
+    roles: ["ADMIN", "MANAGER", "ACCOUNTANT"],
+  },
+
+  {
+    // Reports — every staff-side role can generate a report; SALES/STAFF
+    // only ever see their own activity (enforced server-side), while
+    // ADMIN/MANAGER/ACCOUNTANT can pull org-wide or per-user reports.
+    label: "Reports",
+    href: "/admin/reports",
+    icon: FileText,
   },
 
   {
@@ -126,6 +141,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   {
     label: "Marketing",
     icon: Mail,
+    roles: ["ADMIN", "STAFF", "SALES", "MANAGER"],
     children: [
       { label: "Email Campaigns", href: "/admin/marketing/emails" },
       { label: "SMS Campaigns", href: "/admin/marketing/sms" },
@@ -151,7 +167,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: "Analytics",
     href: "/admin/analytics",
     icon: BarChart3,
-    roles: ["ADMIN"],
+    roles: ["ADMIN", "ACCOUNTANT"],
   },
   {
     label: "Activity Log",
@@ -286,9 +302,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const role = user?.role || "STAFF";
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Load pending stock approval count for admins
+  // Load pending stock approval count for roles that can see the queue
   useEffect(() => {
-    if (role !== "ADMIN") return;
+    if (!["ADMIN", "MANAGER"].includes(role)) return;
     apiGet<any>("/stock-approvals/pending-count")
       .then((r) => setPendingCount(r.data?.count || 0))
       .catch(() => {});
@@ -354,6 +370,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {role === "SALES" && (
           <div className="px-3 py-1.5 mb-2 bg-blue-50 text-blue-700 text-xs font-semibold rounded-lg">
             Sales Manager
+          </div>
+        )}
+        {role === "ACCOUNTANT" && (
+          <div className="px-3 py-1.5 mb-2 bg-teal-50 text-teal-700 text-xs font-semibold rounded-lg">
+            Accountant
           </div>
         )}
         {role === "STAFF" && (
