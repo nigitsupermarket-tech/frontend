@@ -184,7 +184,7 @@ function buildReceiptHtml(
 // Fix: a small FIFO queue processes one print job at a time, and cleanup
 // listens on BOTH the top window and the iframe window (whichever fires
 // first wins), with the fallback timer properly cleared once done.
-let printQueue: Array<{ html: string; onDone?: () => void }> = [];
+const printQueue: Array<{ html: string; onDone?: () => void }> = [];
 let printBusy = false;
 
 function runNextPrintJob() {
