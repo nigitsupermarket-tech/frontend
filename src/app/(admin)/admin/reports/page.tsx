@@ -17,6 +17,8 @@
 //      all three being stacked and capped at a client-side slice.
 
 import { useEffect, useState, useCallback } from "react";
+import { jsPDF } from "jspdf";
+import { autoTable } from "jspdf-autotable";
 import {
   FileText,
   RefreshCcw,
@@ -68,7 +70,21 @@ const INTERVALS = [
   { value: "custom", label: "Custom range" },
 ];
 
+// jsPDF's built-in fonts (Helvetica etc.) only support WinAnsi/Latin-1, which
+// doesn't include the Naira sign (₦, U+20A6). Feeding it to autoTable/text()
+// doesn't throw — it silently renders each character as a separate glyph
+// with stray spacing, which is what was showing up in exported PDFs. Embedding
+// a Unicode-aware font is overkill for one symbol, so the PDF just spells out
+// "NGN" instead; on-screen formatting (formatPrice) is untouched.
+function pdfPrice(amount: number): string {
+  return `NGN ${amount.toLocaleString("en-NG")}`;
+}
+
 const PAGE_SIZE = 20;
+// PDF export pulls the whole filtered range in one call rather than
+// paging through it — this just needs to stay under the backend's cap
+// (see resolvePagination in report.controller.ts).
+const EXPORT_LIMIT = 2000;
 
 interface AppliedFilters {
   interval: string;
@@ -136,6 +152,7 @@ export default function ReportsPage() {
   const [tabData, setTabData] = useState<any>(null);
   const [tabLoading, setTabLoading] = useState(false);
   const [tabError, setTabError] = useState("");
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!isPrivileged) return;
@@ -245,18 +262,202 @@ export default function ReportsPage() {
     setPageByTab((prev) => ({ ...prev, [tab]: page }));
   };
 
-  const downloadJson = () => {
+  const downloadPdf = async () => {
     if (!report) return;
-    const blob = new Blob(
-      [JSON.stringify({ ...report, [activeTab]: tabData }, null, 2)],
-      { type: "application/json" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-${type}-${applied.interval}-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setExporting(true);
+    setError("");
+    try {
+      // Pull the *entire* filtered range for all three detail tables in one
+      // shot (rather than exporting only whatever page/tab happens to be on
+      // screen) so the PDF is a complete report, not a snapshot of the UI.
+      const baseParams: Record<string, string> = {
+        interval: applied.interval,
+        limit: String(EXPORT_LIMIT),
+        page: "1",
+      };
+      if (applied.interval === "custom") {
+        baseParams.from = applied.from;
+        baseParams.to = applied.to;
+      }
+      if (isPrivileged && applied.userId) baseParams.userId = applied.userId;
+
+      const [stockRes, approvalsRes, activityRes] = await Promise.all([
+        apiGet<any>("/reports", { ...baseParams, type: "stock" }),
+        apiGet<any>("/reports", { ...baseParams, type: "stock-approvals" }),
+        apiGet<any>("/reports", { ...baseParams, type: "activity" }),
+      ]);
+
+      const stock = stockRes.data?.stock;
+      const approvals = approvalsRes.data?.stockApprovals;
+      const activity = activityRes.data?.activity;
+
+      const { meta, sales, pos } = report;
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      let y = 16;
+
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("NigitTriple — Business Report", 14, y);
+      y += 7;
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100);
+      const scopeLabel =
+        meta.scope === "org"
+          ? "Whole business"
+          : meta.scope === "user"
+            ? "Selected user"
+            : "Your activity";
+      doc.text(
+        `${formatDateTime(meta.range.start)} — ${formatDateTime(meta.range.end)}  ·  ${scopeLabel}  ·  generated ${formatDateTime(meta.generatedAt)}`,
+        14,
+        y,
+      );
+      doc.setTextColor(0);
+      y += 8;
+
+      // ── Summary cards ────────────────────────────────────────────────
+      if (sales) {
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [["Online Sales", "", ""]],
+          body: [
+            [
+              `Orders: ${sales.orderCount}`,
+              `Revenue: ${pdfPrice(sales.revenue)}`,
+              `Avg Order Value: ${pdfPrice(sales.averageOrderValue)}`,
+            ],
+          ],
+          theme: "plain",
+          headStyles: { fontStyle: "bold", fontSize: 10 },
+          styles: { fontSize: 9 },
+        });
+        y = (doc as any).lastAutoTable.finalY + 6;
+      }
+
+      if (pos) {
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [["POS Sales", "", "", ""]],
+          body: [
+            [
+              `Completed: ${pos.orderCount}`,
+              `Voided: ${pos.voidedCount}`,
+              `Revenue: ${pdfPrice(pos.revenue)}`,
+              `Avg Order Value: ${pdfPrice(pos.averageOrderValue)}`,
+            ],
+          ],
+          theme: "plain",
+          headStyles: { fontStyle: "bold", fontSize: 10 },
+          styles: { fontSize: 9 },
+        });
+        y = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // ── Stock Movement ───────────────────────────────────────────────
+      if (stock) {
+        if (y > 260) {
+          doc.addPage();
+          y = 16;
+        }
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Stock Movement (${stock.totalMovements})`, 14, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [["Date", "Product", "Type", "From", "To", "Reason", "User"]],
+          body: (stock.entries || []).map((r: any) => [
+            formatDateTime(r.createdAt),
+            r.product?.name || "—",
+            r.type,
+            r.previousQty,
+            r.newQty,
+            r.reason || "—",
+            r.performedByName || "System",
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+        y = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // ── Stock Approvals ──────────────────────────────────────────────
+      if (approvals) {
+        if (y > 260) {
+          doc.addPage();
+          y = 16;
+        }
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Stock Approvals (${approvals.total})`, 14, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [
+            ["Date", "Product", "User", "Current", "Requested", "Status", "Reviewed by"],
+          ],
+          body: (approvals.entries || []).map((r: any) => [
+            formatDateTime(r.createdAt),
+            r.productName,
+            r.requestedByName,
+            r.currentQty,
+            r.requestedQty,
+            r.status,
+            r.reviewedByName || "—",
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+        y = (doc as any).lastAutoTable.finalY + 10;
+      }
+
+      // ── Activity Log ─────────────────────────────────────────────────
+      if (activity) {
+        if (y > 260) {
+          doc.addPage();
+          y = 16;
+        }
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Activity Log (${activity.total})`, 14, y);
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [["Date", "User", "Action", "Entity"]],
+          body: (activity.entries || []).map((r: any) => [
+            formatDateTime(r.createdAt),
+            r.userName || "System",
+            r.action,
+            r.entity || "—",
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+      }
+
+      // Footer page numbers
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth - 28, 290);
+      }
+
+      doc.save(`report-${type}-${applied.interval}-${Date.now()}.pdf`);
+    } catch (e: any) {
+      setError(getApiError(e));
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -275,11 +476,11 @@ export default function ReportsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={downloadJson}
-            disabled={!report}
+            onClick={downloadPdf}
+            disabled={!report || exporting}
             className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 disabled:opacity-40"
           >
-            <Download className="w-4 h-4" /> Export
+            <Download className="w-4 h-4" /> {exporting ? "Exporting…" : "Export PDF"}
           </button>
           <button
             onClick={handleGenerate}
