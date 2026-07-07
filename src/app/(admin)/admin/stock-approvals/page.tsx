@@ -70,12 +70,10 @@ export default function StockApprovalsPage() {
   const { user } = useAuthStore();
   const router = useRouter();
 
-  // Guard — only Admin can act on requests now; Manager & Accountant get
-  // read-only visibility into the same history. Everyone else is
-  // redirected away.
-  const canView = ["ADMIN", "MANAGER", "ACCOUNTANT"].includes(
-    user?.role || "",
-  );
+  // Guard — Admin-exclusive page now, full stop. Manager and Accountant no
+  // longer get even read-only access (they used to); anyone else lands back
+  // on the dashboard.
+  const canView = user?.role === "ADMIN";
   const canAction = user?.role === "ADMIN";
 
   useEffect(() => {

@@ -40,22 +40,21 @@ export default function AdminAnalyticsPage() {
   const fetchAll = async () => {
     setIsLoading(true);
     try {
-      const [ov, rev, top] = await Promise.all([
+      const [ov, rev, top, statusRes] = await Promise.all([
         apiGet<any>("/analytics/dashboard"),
-        apiGet<any>("/analytics/revenue", { days: range }),
-        apiGet<any>("/analytics/top-products", { limit: 5 }),
+        apiGet<any>("/analytics/revenue", { period: range }),
+        apiGet<any>("/analytics/top-products", { period: range, limit: 5 }),
+        apiGet<any>("/analytics/orders-by-status"),
       ]);
       setOverview(ov.data);
-      setRevenue(rev.data.data || []);
+      setRevenue(rev.data.chart || []);
       setTopProducts(top.data.products || []);
-      if (ov.data.ordersByStatus) {
-        setOrdersByStatus(
-          Object.entries(ov.data.ordersByStatus).map(([name, value]) => ({
-            name,
-            value,
-          })),
-        );
-      }
+      setOrdersByStatus(
+        (statusRes.data.statusBreakdown || []).map((s: any) => ({
+          name: s.label,
+          value: s.count,
+        })),
+      );
     } catch {
     } finally {
       setIsLoading(false);
@@ -72,28 +71,28 @@ export default function AdminAnalyticsPage() {
     {
       icon: DollarSign,
       label: "Total Revenue",
-      value: formatPrice(overview?.totalRevenue || 0),
+      value: formatPrice(overview?.combined?.totalRevenue ?? overview?.revenue?.total ?? 0),
       color: "text-brand-600",
       bg: "bg-brand-50",
     },
     {
       icon: ShoppingBag,
       label: "Total Orders",
-      value: formatNumber(overview?.totalOrders || 0),
+      value: formatNumber(overview?.combined?.totalOrders ?? overview?.orders?.total ?? 0),
       color: "text-blue-600",
       bg: "bg-blue-50",
     },
     {
       icon: Users,
       label: "Total Customers",
-      value: formatNumber(overview?.totalCustomers || 0),
+      value: formatNumber(overview?.customers?.total || 0),
       color: "text-green-600",
       bg: "bg-green-50",
     },
     {
       icon: TrendingUp,
       label: "Avg Order Value",
-      value: formatPrice(overview?.avgOrderValue || 0),
+      value: formatPrice(overview?.combined?.avgOrderValue || 0),
       color: "text-purple-600",
       bg: "bg-purple-50",
     },

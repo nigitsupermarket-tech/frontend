@@ -22,6 +22,7 @@ export default function AccountPage() {
     user?.role === "ADMIN" ||
     user?.role === "STAFF" ||
     user?.role === "SALES" ||
+    user?.role === "ACCOUNTANT" ||
     user?.role === "MANAGER";
 
   const menuItems = [

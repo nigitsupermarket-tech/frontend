@@ -103,13 +103,13 @@ const ALL_NAV_ITEMS: NavItem[] = [
   },
 
   {
-    // Stock Approvals — ADMIN & MANAGER can act on requests; ACCOUNTANT
-    // gets read-only visibility into the approval history (action buttons
-    // are hidden for ACCOUNTANT inside the page itself).
+    // Stock Approvals — ADMIN only, full stop. Manager and Accountant no
+    // longer get a read-only view either; the page itself also redirects
+    // them away if they hit the URL directly (see stock-approvals/page.tsx).
     label: "Stock Approvals",
     href: "/admin/stock-approvals",
     icon: ClipboardCheck,
-    roles: ["ADMIN", "MANAGER", "ACCOUNTANT"],
+    roles: ["ADMIN"],
   },
 
   {
@@ -167,7 +167,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: "Analytics",
     href: "/admin/analytics",
     icon: BarChart3,
-    roles: ["ADMIN", "ACCOUNTANT"],
+    roles: ["ADMIN", "ACCOUNTANT", "MANAGER"],
   },
   {
     label: "Activity Log",
@@ -302,9 +302,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const role = user?.role || "STAFF";
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Load pending stock approval count for roles that can see the queue
+  // Load pending stock approval count — Admin only now sees the queue at all.
   useEffect(() => {
-    if (!["ADMIN", "MANAGER"].includes(role)) return;
+    if (role !== "ADMIN") return;
     apiGet<any>("/stock-approvals/pending-count")
       .then((r) => setPendingCount(r.data?.count || 0))
       .catch(() => {});
