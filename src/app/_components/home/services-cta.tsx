@@ -1,4 +1,12 @@
 import Link from "next/link";
+import { Tag, ShoppingCart, Truck, Leaf, CreditCard } from "lucide-react";
+
+const FEATURES = [
+  { icon: ShoppingCart, label: "Free In-Store Pickup" },
+  { icon: Truck, label: "Local Delivery" },
+  { icon: Leaf, label: "Fresh & Quality" },
+  { icon: CreditCard, label: "Easy Payments" },
+];
 
 export function ServicesCTA() {
   return (
@@ -17,9 +25,9 @@ export function ServicesCTA() {
             <div className="flex flex-wrap gap-3">
               <Link
                 href="/products?isOnPromotion=true"
-                className="px-6 py-3 bg-amber-400 text-gray-900 font-semibold rounded-xl hover:bg-amber-500 transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-amber-400 text-gray-900 font-semibold rounded-xl hover:bg-amber-500 transition-colors"
               >
-                🏷️ View Promotions
+                <Tag className="w-4 h-4" /> View Promotions
               </Link>
               <Link
                 href="/products"
@@ -31,17 +39,13 @@ export function ServicesCTA() {
           </div>
           <div className="hidden lg:block">
             <div className="grid grid-cols-2 gap-4">
-              {[
-                "🛒 Free In-Store Pickup",
-                "🚚 Local Delivery",
-                "🌿 Fresh & Quality",
-                "💳 Easy Payments",
-              ].map((item) => (
+              {FEATURES.map(({ icon: Icon, label }) => (
                 <div
-                  key={item}
-                  className="bg-white/10 rounded-xl p-4 text-center"
+                  key={label}
+                  className="flex items-center justify-center gap-2 bg-white/10 rounded-xl p-4 text-center"
                 >
-                  <p className="text-white font-medium text-sm">{item}</p>
+                  <Icon className="w-4 h-4 text-white shrink-0" />
+                  <p className="text-white font-medium text-sm">{label}</p>
                 </div>
               ))}
             </div>

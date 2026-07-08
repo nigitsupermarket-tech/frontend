@@ -19,6 +19,11 @@ const iconOptions = [
   "star",
   "heart",
   "shield",
+  "sprout",
+  "handshake",
+  "zap",
+  "recycle",
+  "lightbulb",
 ];
 
 interface MediaItem {

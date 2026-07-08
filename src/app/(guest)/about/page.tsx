@@ -9,6 +9,9 @@ import {
   TrendingUp,
   Globe,
   CheckCircle,
+  Star,
+  Heart,
+  Shield,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -21,6 +24,9 @@ const iconMap: Record<string, any> = {
   trending: TrendingUp,
   globe: Globe,
   check: CheckCircle,
+  star: Star,
+  heart: Heart,
+  shield: Shield,
 };
 
 export default function AboutUsPage() {

@@ -167,7 +167,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: "Analytics",
     href: "/admin/analytics",
     icon: BarChart3,
-    roles: ["ADMIN", "ACCOUNTANT", "MANAGER"],
+    roles: ["ADMIN", "ACCOUNTANT"],
   },
   {
     label: "Activity Log",

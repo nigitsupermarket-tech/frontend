@@ -1,8 +1,22 @@
+"use client";
+
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { NewArrivalsGrid } from "./product-grids";
+import { ProductCard } from "@/components/customer/product-card";
+import { ProductCardSkeleton } from "@/components/shared/loading-spinner";
+import { useNewArrivals } from "@/hooks/useProducts";
+
+const GRID =
+  "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4";
 
 export function NewArrivals() {
+  const { products, isLoading } = useNewArrivals(8);
+
+  // Same rule as Featured Products: hide the whole section (title + "View
+  // all") once we know there's nothing to show, instead of leaving an
+  // empty-looking header on the homepage.
+  if (!isLoading && products.length === 0) return null;
+
   return (
     <section className="bg-gray-50 py-16">
       <div className="container">
@@ -22,7 +36,20 @@ export function NewArrivals() {
             View all <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
-        <NewArrivalsGrid />
+
+        {isLoading ? (
+          <div className={GRID}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : (
+          <div className={GRID}>
+            {products.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
