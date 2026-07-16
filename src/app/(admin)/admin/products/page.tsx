@@ -12,6 +12,7 @@ import {
   X,
   ArrowUpDown,
   Package,
+  AlertTriangle,
 } from "lucide-react";
 import { Product, Pagination } from "@/types";
 import { apiGet, apiDelete, apiPost, getApiError } from "@/lib/api";
@@ -81,7 +82,13 @@ export default function AdminProductsPage() {
 
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
+  // Hard delete is restricted to ADMIN and MANAGER roles
+  const canDelete = user?.role === "ADMIN" || user?.role === "MANAGER";
   const toast = useToast();
+
+  // Warning dialog state for hard delete
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     apiGet<any>("/categories?limit=200")
@@ -147,18 +154,28 @@ export default function AdminProductsPage() {
     filters.status ||
     filters.stockStatus;
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!isAdmin) {
-      toast("Only admins can delete products", "error");
+  // Opens the warning dialog for a given product (does not delete yet)
+  const requestDelete = (product: Product) => {
+    if (!canDelete) {
+      toast("Only admins and managers can delete products", "error");
       return;
     }
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    setDeleteTarget(product);
+  };
+
+  // Confirmed from the warning dialog — performs the actual hard delete
+  const confirmDelete = async () => {
+    if (!deleteTarget || !canDelete) return;
+    setIsDeleting(true);
     try {
-      await apiDelete(`/products/${id}`);
-      toast(`"${name}" deleted`, "success");
+      await apiDelete(`/products/${deleteTarget.id}`);
+      toast(`"${deleteTarget.name}" permanently deleted`, "success");
+      setDeleteTarget(null);
       fetchProducts(page, filters);
     } catch (err) {
       toast(getApiError(err), "error");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -475,12 +492,10 @@ export default function AdminProductsPage() {
                         >
                           <Edit2 className="w-4 h-4" />
                         </Link>
-                        {/* Only admins can delete */}
-                        {isAdmin && (
+                        {/* Only ADMIN and MANAGER can see/perform hard delete */}
+                        {canDelete && (
                           <button
-                            onClick={() =>
-                              handleDelete(product.id, product.name)
-                            }
+                            onClick={() => requestDelete(product)}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                             title="Delete"
                           >
@@ -529,6 +544,51 @@ export default function AdminProductsPage() {
         onClose={() => setShowImportExport(false)}
         onSuccess={() => fetchProducts(page, filters)}
       />
+
+      {/* Hard Delete Warning Dialog (ADMIN / MANAGER only) */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-full bg-red-50 shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="font-bold text-gray-900">Delete product?</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  This will permanently delete{" "}
+                  <span className="font-medium text-gray-700">
+                    &ldquo;{deleteTarget.name}&rdquo;
+                  </span>{" "}
+                  and all of its images. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800">
+              ⚠️ Hard delete: the product record is removed completely — it
+              cannot be recovered or restored.
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+              >
+                {isDeleting ? "Deleting…" : "Delete Permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Stock Update Modal (Staff / Sales) */}
       {quickStock && (
