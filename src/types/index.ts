@@ -281,6 +281,9 @@ export interface Order {
   proofOfPaymentUrl?: string;
   proofSubmittedAt?: string;
   statusHistory?: OrderStatusHistory[];
+  isPickup?: boolean;
+  invoiceEmailSent?: boolean;
+  lastStatusEmailAt?: string;
 }
 
 export interface OrderItem {
@@ -574,5 +577,11 @@ export type PaymentStatus =
   | "REFUNDED";
 export type StockStatus = "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
 export type ProductStatus = "ACTIVE" | "INACTIVE" | "DRAFT";
-export type UserRole = "CUSTOMER" | "STAFF" | "ADMIN" | "SALES" | "MANAGER" | "ACCOUNTANT";
+export type UserRole =
+  | "CUSTOMER"
+  | "STAFF"
+  | "ADMIN"
+  | "SALES"
+  | "MANAGER"
+  | "ACCOUNTANT";
 export type BlogStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";

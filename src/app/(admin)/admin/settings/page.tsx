@@ -18,6 +18,13 @@ export default function AdminEmailSettingsPage() {
   const [notifEmails, setNotifEmails] = useState<string[]>([]);
   const [newNotifEmail, setNewNotifEmail] = useState("");
 
+  const [invoiceEmailMode, setInvoiceEmailMode] = useState<"manual" | "auto">(
+    "manual",
+  );
+  const [orderStatusEmailMode, setOrderStatusEmailMode] = useState<
+    "manual" | "auto"
+  >("manual");
+
   const toast = useToast();
 
   useEffect(() => {
@@ -29,6 +36,10 @@ export default function AdminEmailSettingsPage() {
           Array.isArray(s.adminNotificationEmails)
             ? s.adminNotificationEmails
             : [],
+        );
+        setInvoiceEmailMode(s.invoiceEmailMode === "auto" ? "auto" : "manual");
+        setOrderStatusEmailMode(
+          s.orderStatusEmailMode === "auto" ? "auto" : "manual",
         );
       })
       .catch(() => {})
@@ -87,8 +98,10 @@ export default function AdminEmailSettingsPage() {
     try {
       await apiPut("/settings/notifications", {
         adminNotificationEmails: notifEmails,
+        invoiceEmailMode,
+        orderStatusEmailMode,
       });
-      toast("Notification emails saved", "success");
+      toast("Notification settings saved", "success");
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -228,6 +241,76 @@ export default function AdminEmailSettingsPage() {
           Save Settings
         </button>
       </form>
+
+      {/* ── Order Email Automation (super admin only) ─────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <Bell className="w-4 h-4 text-brand-600" />
+          <h2 className="font-semibold text-gray-900">
+            Order Email Automation
+          </h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          Choose whether these customer emails go out automatically or only when
+          a staff member manually sends them from the order screen. Both default
+          to <span className="font-medium">Manual</span>.
+        </p>
+
+        {[
+          {
+            label: "Invoice email",
+            hint: "Order-confirmation/invoice email sent after a customer places an order.",
+            value: invoiceEmailMode,
+            setValue: setInvoiceEmailMode,
+          },
+          {
+            label: "Order status update email",
+            hint: "Sent whenever an order's status changes (status update, tracking event, payment confirmation).",
+            value: orderStatusEmailMode,
+            setValue: setOrderStatusEmailMode,
+          },
+        ].map(({ label, hint, value, setValue }) => (
+          <div
+            key={label}
+            className="flex items-center justify-between gap-4 py-2 border-b border-gray-50 last:border-0"
+          >
+            <div>
+              <p className="text-sm font-medium text-gray-800">{label}</p>
+              <p className="text-xs text-gray-400 max-w-md">{hint}</p>
+            </div>
+            <div className="flex rounded-xl border border-gray-200 overflow-hidden shrink-0">
+              {(["manual", "auto"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setValue(mode)}
+                  className={`px-4 py-2 text-xs font-semibold capitalize transition-colors ${
+                    value === mode
+                      ? "bg-brand-600 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={saveNotifEmails}
+          disabled={savingNotif}
+          className="flex items-center gap-2 px-6 py-3 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 transition-colors"
+        >
+          {savingNotif ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Save className="w-4 h-4" />
+          )}{" "}
+          Save Automation Settings
+        </button>
+      </div>
 
       {/* ── Admin Notification Emails ──────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4">

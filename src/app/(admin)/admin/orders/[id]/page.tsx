@@ -13,6 +13,9 @@ import {
   CheckCircle,
   Building2,
   ImageIcon,
+  Printer,
+  Send,
+  Bell,
 } from "lucide-react";
 import { Order } from "@/types";
 import { apiGet, apiPut, apiPost, getApiError } from "@/lib/api";
@@ -27,6 +30,7 @@ import {
 import { PageLoader, ErrorState } from "@/components/shared/loading-spinner";
 import { useToast } from "@/store/uiStore";
 import { useAuth } from "@/hooks/useAuth";
+import { useSettings } from "@/hooks/useSettings";
 import Image from "next/image";
 
 const ORDER_STATUSES = [
@@ -93,6 +97,9 @@ export default function AdminOrderDetailPage() {
   // ACCOUNTANT has view-only access to orders — no status updates,
   // tracking events, or payment confirmation.
   const canProcess = user?.role !== "ACCOUNTANT";
+  const { settings } = useSettings();
+  const [sendingInvoice, setSendingInvoice] = useState(false);
+  const [notifying, setNotifying] = useState(false);
 
   const loadOrder = () => {
     setIsLoading(true);
@@ -172,6 +179,115 @@ export default function AdminOrderDetailPage() {
     }
   };
 
+  const sendInvoice = async () => {
+    if (!order) return;
+    setSendingInvoice(true);
+    try {
+      await apiPost(`/orders/${id}/send-invoice`, {});
+      toast("Invoice sent to customer", "success");
+      loadOrder();
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setSendingInvoice(false);
+    }
+  };
+
+  const notifyCustomer = async () => {
+    if (!order) return;
+    setNotifying(true);
+    try {
+      await apiPost(`/orders/${id}/notify-status`, {});
+      toast("Customer notified", "success");
+      loadOrder();
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setNotifying(false);
+    }
+  };
+
+  // ── Print invoice using an iframe — same technique AND same 80mm
+  // receipt paper size as the POS printer (see pos/page.tsx), so both
+  // print jobs come out on identical stock. The "ONLINE ORDER" badge in
+  // the markup below is what tells the two apart at a glance. Opens the
+  // browser print dialog, which staff can "Save as PDF" from. ──────────────
+  const printInvoice = () => {
+    const el = document.getElementById("invoice-content");
+    if (!el) return;
+
+    const existing = document.getElementById("order-invoice-print-frame");
+    if (existing) existing.remove();
+
+    const html = `
+      <!DOCTYPE html><html><head>
+      <style>
+        @page { size: 80mm auto; margin: 0; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
+               width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;
+               color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .text-center, .center { text-align: center; }
+        .font-bold, .bold, b, strong { font-weight: 900; }
+        .text-gray-400, .text-gray-500, .text-gray-600 { color: #000; }
+        .border-t { border-top: 1px dashed #000; margin: 3mm 0; }
+        .border-dashed { border-style: dashed; }
+        .flex { display: flex; }
+        .justify-between { justify-content: space-between; }
+        .space-y-1 > * { margin-bottom: 1mm; }
+        .text-base { font-size: 13px; font-weight: 700; }
+        .text-2xl, .text-xl { font-size: 15px; font-weight: 900; }
+        .text-xs { font-size: 11px; }
+        .my-2, .mb-3, .mt-3 { margin: 2mm 0; }
+        .pt-1, .pt-2 { padding-top: 1mm; }
+        * { letter-spacing: 0.01em; }
+        /* ── Online-order badge — visually distinguishes this from a POS
+           in-store receipt at a glance ── */
+        .online-badge { display: inline-block; border: 1px solid #000; padding: 1mm 3mm;
+                        font-weight: 900; letter-spacing: 0.1em; margin: 1mm 0; }
+      </style>
+      </head><body>${el.innerHTML}</body></html>
+    `;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "order-invoice-print-frame";
+    iframe.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:297mm;border:none;";
+
+    const cleanup = () => {
+      try {
+        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch (_) {
+        /* ignore */
+      }
+    };
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        const win = iframe.contentWindow;
+        if (!win) {
+          cleanup();
+          return;
+        }
+        win.focus();
+        win.addEventListener("afterprint", cleanup, { once: true });
+        win.print();
+        setTimeout(cleanup, 30_000);
+      }, 300);
+    };
+
+    iframe.src = blobUrl;
+    document.body.appendChild(iframe);
+  };
+
   if (isLoading) return <PageLoader />;
   if (error || !order)
     return (
@@ -200,7 +316,13 @@ export default function AdminOrderDetailPage() {
             {formatDateTime(order.createdAt)}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={printInvoice}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print Invoice
+          </button>
           <span
             className={`px-3 py-1 rounded-full text-sm font-medium ${ORDER_STATUS_COLORS[order.status]}`}
           >
@@ -649,6 +771,70 @@ export default function AdminOrderDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Customer notifications — manual invoice/status-email triggers.
+              Auto-sends still happen in the background if a super admin has
+              turned that on in Settings → Notifications. */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-green-600" /> Customer Notifications
+            </h2>
+            <div className="text-sm space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-gray-700 font-medium">Invoice email</p>
+                  <p className="text-xs text-gray-400">
+                    {order.invoiceEmailSent
+                      ? "Sent to customer"
+                      : "Not sent yet"}
+                  </p>
+                </div>
+                {canProcess && (
+                  <button
+                    onClick={sendInvoice}
+                    disabled={sendingInvoice}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 shrink-0"
+                  >
+                    {sendingInvoice ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                    {order.invoiceEmailSent ? "Resend" : "Send"}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-50">
+                <div>
+                  <p className="text-gray-700 font-medium">Status update</p>
+                  <p className="text-xs text-gray-400">
+                    {order.lastStatusEmailAt
+                      ? `Last notified ${formatDateTime(order.lastStatusEmailAt)}`
+                      : "Customer not notified yet"}
+                  </p>
+                </div>
+                {canProcess && (
+                  <button
+                    onClick={notifyCustomer}
+                    disabled={notifying}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 shrink-0"
+                  >
+                    {notifying ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Bell className="w-3.5 h-3.5" />
+                    )}
+                    Notify
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 pt-1">
+                Automatic sending is controlled by a super admin under Settings
+                → Notifications.
+              </p>
+            </div>
+          </div>
+
           {(order.trackingNumber || order.trackingUrl) && (
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
@@ -672,6 +858,101 @@ export default function AdminOrderDetailPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Hidden invoice markup — read by printInvoice() via innerHTML.
+          Same 80mm receipt paper size as the POS printer, with an
+          "ONLINE ORDER" badge so the two are never confused at a glance. */}
+      <div id="invoice-content" className="hidden font-mono text-xs">
+        <div className="text-center mb-3">
+          <p className="font-bold text-base">
+            {settings?.siteName || "NigitTriple Supermarket"}
+          </p>
+          {settings?.address && (
+            <p className="text-gray-500">{settings.address}</p>
+          )}
+          {settings?.phone && (
+            <p className="text-gray-500">Tel: {settings.phone}</p>
+          )}
+          <div className="border-t border-dashed border-gray-300 my-2" />
+          <span className="online-badge">ONLINE ORDER</span>
+          <p className="text-gray-600 mt-1">Order #{order.orderNumber}</p>
+          <p className="text-gray-600">{formatDateTime(order.createdAt)}</p>
+          <p className="text-gray-600">Customer: {order.customerName}</p>
+          {order.customerPhone && (
+            <p className="text-gray-600">Phone: {order.customerPhone}</p>
+          )}
+          <div className="border-t border-dashed border-gray-300 my-2" />
+        </div>
+
+        <div className="space-y-1 mb-3">
+          {order.items.map((item: any) => (
+            <div key={item.id} className="flex justify-between">
+              <span>
+                {item.product.name} x{item.quantity}
+              </span>
+              <span>{formatPrice(item.price * item.quantity)}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t border-dashed border-gray-300 my-2" />
+        <div className="space-y-1">
+          <div className="flex justify-between">
+            <span>Subtotal</span>
+            <span>{formatPrice(order.subtotal)}</span>
+          </div>
+          {order.discountAmount > 0 && (
+            <div className="flex justify-between">
+              <span>Discount</span>
+              <span>-{formatPrice(order.discountAmount)}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span>Shipping</span>
+            <span>{formatPrice(order.shippingCost)}</span>
+          </div>
+          <div className="border-t border-dashed border-gray-300 my-2" />
+          <div className="flex justify-between text-base font-bold">
+            <span>TOTAL</span>
+            <span>{formatPrice(order.total)}</span>
+          </div>
+        </div>
+
+        <div className="border-t border-dashed border-gray-300 my-2" />
+        <p className="text-gray-600">
+          Payment:{" "}
+          {order.paymentMethod === "BANK_TRANSFER"
+            ? "Bank Transfer"
+            : order.paymentMethod}{" "}
+          ({order.paymentStatus})
+        </p>
+        <p className="text-gray-600">
+          Status: {ORDER_STATUS_LABELS[order.status] || order.status}
+        </p>
+        {!order.isPickup && (
+          <>
+            <div className="border-t border-dashed border-gray-300 my-2" />
+            <p className="text-gray-600 font-bold">Ship to:</p>
+            <p className="text-gray-600">
+              {(order.shippingAddress as any)?.fullName ||
+                `${(order.shippingAddress as any)?.firstName || ""} ${(order.shippingAddress as any)?.lastName || ""}`.trim()}
+            </p>
+            <p className="text-gray-600">
+              {(order.shippingAddress as any)?.address ||
+                (order.shippingAddress as any)?.addressLine1}
+            </p>
+            <p className="text-gray-600">
+              {(order.shippingAddress as any)?.city},{" "}
+              {(order.shippingAddress as any)?.state}
+            </p>
+          </>
+        )}
+
+        <div className="border-t border-dashed border-gray-300 my-2" />
+        <p className="text-center text-gray-500 mt-2">
+          Thank you for shopping with us!
+        </p>
       </div>
     </div>
   );
