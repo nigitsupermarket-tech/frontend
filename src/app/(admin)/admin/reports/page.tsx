@@ -1,21 +1,6 @@
 "use client";
 
 // frontend/src/app/(admin)/admin/reports/page.tsx
-//
-// Universal report generator — every staff-side role lands here.
-// SALES/STAFF only ever pull their own activity (server-enforced); ADMIN,
-// MANAGER, and ACCOUNTANT can pull an org-wide report or drill into any
-// specific user's activity.
-//
-// Layout:
-//   1. Shared filter bar (report type for the summary cards, interval,
-//      custom date range, scope/user) — applied via "Generate".
-//   2. Summary cards (Online Sales / POS Sales) driven by that filter bar.
-//   3. A tabbed detail section (Stock Movement / Stock Approvals /
-//      Activity Log) that is always visible, always driven by the SAME
-//      interval/date/scope filters, and paginates server-side instead of
-//      all three being stacked and capped at a client-side slice.
-
 import { useEffect, useState, useCallback } from "react";
 import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
@@ -154,6 +139,13 @@ export default function ReportsPage() {
   const [tabError, setTabError] = useState("");
   const [exporting, setExporting] = useState(false);
 
+  // Stock-movement tab only — filters InventoryLog entries by sales
+  // channel. "all" (default) shows everything, same as before this filter
+  // existed.
+  const [stockSource, setStockSource] = useState<"all" | "online" | "pos">(
+    "all",
+  );
+
   useEffect(() => {
     if (!isPrivileged) return;
     // Populate the user picker so ADMIN/MANAGER/ACCOUNTANT can pull a
@@ -197,7 +189,12 @@ export default function ReportsPage() {
 
   // ── Detail tab fetch — always filtered by the same applied filters ──
   const fetchTab = useCallback(
-    async (tab: string, page: number, filters: AppliedFilters) => {
+    async (
+      tab: string,
+      page: number,
+      filters: AppliedFilters,
+      source: "all" | "online" | "pos",
+    ) => {
       setTabLoading(true);
       setTabError("");
       try {
@@ -216,6 +213,8 @@ export default function ReportsPage() {
           params.to = filters.to;
         }
         if (isPrivileged && filters.userId) params.userId = filters.userId;
+        // Sales-channel filter only applies to the stock-movement tab.
+        if (tab === "stock" && source !== "all") params.source = source;
 
         const res = await apiGet<any>("/reports", params);
         setTabData(res.data?.[SECTION_KEY[tab]] ?? null);
@@ -235,12 +234,13 @@ export default function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applied, type]);
 
-  // Detail tab refetches on tab switch, page change, or applied filters —
-  // this is what makes the filter bar actually govern the tabbed tables.
+  // Detail tab refetches on tab switch, page change, applied filters, or
+  // (for the stock tab) the sales-channel source filter — this is what
+  // makes the filter bar actually govern the tabbed tables.
   useEffect(() => {
-    fetchTab(activeTab, pageByTab[activeTab] || 1, applied);
+    fetchTab(activeTab, pageByTab[activeTab] || 1, applied, stockSource);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, pageByTab[activeTab], applied]);
+  }, [activeTab, pageByTab[activeTab], applied, stockSource]);
 
   const handleGenerate = () => {
     if (interval === "custom" && (!from || !to)) {
@@ -260,6 +260,11 @@ export default function ReportsPage() {
 
   const setTabPage = (tab: string, page: number) => {
     setPageByTab((prev) => ({ ...prev, [tab]: page }));
+  };
+
+  const handleStockSourceChange = (source: "all" | "online" | "pos") => {
+    setStockSource(source);
+    setPageByTab((prev) => ({ ...prev, stock: 1 }));
   };
 
   const downloadPdf = async () => {
@@ -282,7 +287,11 @@ export default function ReportsPage() {
       if (isPrivileged && applied.userId) baseParams.userId = applied.userId;
 
       const [stockRes, approvalsRes, activityRes] = await Promise.all([
-        apiGet<any>("/reports", { ...baseParams, type: "stock" }),
+        apiGet<any>("/reports", {
+          ...baseParams,
+          type: "stock",
+          ...(stockSource !== "all" ? { source: stockSource } : {}),
+        }),
         apiGet<any>("/reports", { ...baseParams, type: "stock-approvals" }),
         apiGet<any>("/reports", { ...baseParams, type: "activity" }),
       ]);
@@ -366,7 +375,17 @@ export default function ReportsPage() {
         }
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
-        doc.text(`Stock Movement (${stock.totalMovements})`, 14, y);
+        const sourceLabel =
+          stockSource === "online"
+            ? " — Online Orders"
+            : stockSource === "pos"
+              ? " — POS"
+              : "";
+        doc.text(
+          `Stock Movement (${stock.totalMovements})${sourceLabel}`,
+          14,
+          y,
+        );
         y += 4;
         autoTable(doc, {
           startY: y,
@@ -401,7 +420,15 @@ export default function ReportsPage() {
           startY: y,
           margin: { left: 14, right: 14 },
           head: [
-            ["Date", "Product", "User", "Current", "Requested", "Status", "Reviewed by"],
+            [
+              "Date",
+              "Product",
+              "User",
+              "Current",
+              "Requested",
+              "Status",
+              "Reviewed by",
+            ],
           ],
           body: (approvals.entries || []).map((r: any) => [
             formatDateTime(r.createdAt),
@@ -480,7 +507,8 @@ export default function ReportsPage() {
             disabled={!report || exporting}
             className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-xl text-sm hover:bg-gray-50 disabled:opacity-40"
           >
-            <Download className="w-4 h-4" /> {exporting ? "Exporting…" : "Export PDF"}
+            <Download className="w-4 h-4" />{" "}
+            {exporting ? "Exporting…" : "Export PDF"}
           </button>
           <button
             onClick={handleGenerate}
@@ -607,25 +635,54 @@ export default function ReportsPage() {
       {/* Tabbed detail section — always visible, always filtered by the
           same interval/date/scope controls above. */}
       <div className="space-y-3">
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-          {DETAIL_TABS.map((t) => {
-            const Icon = t.icon;
-            const isActive = activeTab === t.value;
-            return (
-              <button
-                key={t.value}
-                onClick={() => setActiveTab(t.value)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-white shadow-sm text-gray-900"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {t.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+            {DETAIL_TABS.map((t) => {
+              const Icon = t.icon;
+              const isActive = activeTab === t.value;
+              return (
+                <button
+                  key={t.value}
+                  onClick={() => setActiveTab(t.value)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Sales-channel filter — only meaningful on the stock-movement
+              tab (InventoryLog rows are tagged ONLINE_SALE/ONLINE_RETURN
+              for the website, POS_SALE/RETURN for in-store). */}
+          {activeTab === "stock" && (
+            <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+              {(
+                [
+                  { value: "all", label: "All" },
+                  { value: "online", label: "Online Orders" },
+                  { value: "pos", label: "POS" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleStockSourceChange(opt.value)}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    stockSource === opt.value
+                      ? "bg-brand-600 text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {tabError && (
@@ -687,8 +744,14 @@ function SummaryResults({ report }: { report: any }) {
       {sections.pos && (
         <Section title="POS Sales">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <SummaryCard label="Completed orders" value={sections.pos.orderCount} />
-            <SummaryCard label="Voided orders" value={sections.pos.voidedCount} />
+            <SummaryCard
+              label="Completed orders"
+              value={sections.pos.orderCount}
+            />
+            <SummaryCard
+              label="Voided orders"
+              value={sections.pos.voidedCount}
+            />
             <SummaryCard
               label="Revenue"
               value={formatPriceCompact(sections.pos.revenue)}
@@ -731,8 +794,16 @@ function DetailTabPanel({
         <EntryTable
           rows={data.entries}
           columns={[
-            { key: "createdAt", label: "Date", render: (r: any) => formatDateTime(r.createdAt) },
-            { key: "product", label: "Product", render: (r: any) => r.product?.name || "—" },
+            {
+              key: "createdAt",
+              label: "Date",
+              render: (r: any) => formatDateTime(r.createdAt),
+            },
+            {
+              key: "product",
+              label: "Product",
+              render: (r: any) => r.product?.name || "—",
+            },
             { key: "type", label: "Type" },
             { key: "previousQty", label: "From" },
             { key: "newQty", label: "To" },
@@ -740,7 +811,11 @@ function DetailTabPanel({
             { key: "performedByName", label: "User" },
           ]}
         />
-        <Pagination pagination={data.pagination} page={page} onPageChange={onPageChange} />
+        <Pagination
+          pagination={data.pagination}
+          page={page}
+          onPageChange={onPageChange}
+        />
       </div>
     );
   }
@@ -757,7 +832,11 @@ function DetailTabPanel({
         <EntryTable
           rows={data.entries}
           columns={[
-            { key: "createdAt", label: "Date", render: (r: any) => formatDateTime(r.createdAt) },
+            {
+              key: "createdAt",
+              label: "Date",
+              render: (r: any) => formatDateTime(r.createdAt),
+            },
             { key: "productName", label: "Product" },
             { key: "requestedByName", label: "User" },
             { key: "currentQty", label: "Current" },
@@ -766,7 +845,11 @@ function DetailTabPanel({
             { key: "reviewedByName", label: "Reviewed by" },
           ]}
         />
-        <Pagination pagination={data.pagination} page={page} onPageChange={onPageChange} />
+        <Pagination
+          pagination={data.pagination}
+          page={page}
+          onPageChange={onPageChange}
+        />
       </div>
     );
   }
@@ -777,18 +860,32 @@ function DetailTabPanel({
       <EntryTable
         rows={data.entries}
         columns={[
-          { key: "createdAt", label: "Date", render: (r: any) => formatDateTime(r.createdAt) },
+          {
+            key: "createdAt",
+            label: "Date",
+            render: (r: any) => formatDateTime(r.createdAt),
+          },
           { key: "userName", label: "User" },
           { key: "action", label: "Action" },
           { key: "entity", label: "Entity" },
         ]}
       />
-      <Pagination pagination={data.pagination} page={page} onPageChange={onPageChange} />
+      <Pagination
+        pagination={data.pagination}
+        page={page}
+        onPageChange={onPageChange}
+      />
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <h2 className="text-sm font-semibold text-gray-700 mb-2">{title}</h2>
@@ -802,7 +899,12 @@ function Pagination({
   page,
   onPageChange,
 }: {
-  pagination?: { page: number; totalPages: number; total: number; limit: number };
+  pagination?: {
+    page: number;
+    totalPages: number;
+    total: number;
+    limit: number;
+  };
   page: number;
   onPageChange: (page: number) => void;
 }) {
@@ -844,7 +946,11 @@ function EntryTable({
   columns,
 }: {
   rows: any[];
-  columns: { key: string; label: string; render?: (r: any) => React.ReactNode }[];
+  columns: {
+    key: string;
+    label: string;
+    render?: (r: any) => React.ReactNode;
+  }[];
 }) {
   if (!rows || rows.length === 0)
     return (
