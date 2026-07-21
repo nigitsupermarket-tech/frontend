@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Edit2, Trash2, Search, UserCog } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, Edit2, Trash2 } from "lucide-react";
 import { User } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -18,49 +18,11 @@ const roleColors: Record<string, string> = {
   STAFF: "bg-purple-100 text-purple-700",
   SALES: "bg-blue-100 text-blue-700",
   ACCOUNTANT: "bg-teal-100 text-teal-700",
-  CUSTOMER: "bg-gray-100 text-gray-600",
 };
-
-// Mirrors backend/src/utils/roleHierarchy.ts — lower number = more senior.
-// Keep these in sync if the hierarchy ever changes.
-const ROLE_RANK: Record<string, number> = {
-  ADMIN: 0,
-  MANAGER: 1,
-  STAFF: 2,
-  ACCOUNTANT: 3,
-  SALES: 3,
-  CUSTOMER: 4,
-};
-const ALL_ROLES = Object.keys(ROLE_RANK);
 
 export default function AdminUsersPage() {
   const { user: currentUser } = useAuthStore();
-  const currentRole = currentUser?.role || "";
-  const currentRank = ROLE_RANK[currentRole] ?? 99;
-  const isAdmin = currentRole === "ADMIN";
-
-  // Roles this actor is allowed to see at all — peers and anything below
-  // them in the hierarchy. Mirrors the backend's rolesAbove() exclusion.
-  const visibleRoles = isAdmin
-    ? ALL_ROLES
-    : ALL_ROLES.filter((r) => ROLE_RANK[r] >= currentRank);
-
-  // Roles this actor is allowed to ASSIGN to someone (strictly below their
-  // own rank) — ADMIN can assign anything, including ADMIN itself.
-  const assignableRoles = isAdmin
-    ? ALL_ROLES
-    : ALL_ROLES.filter((r) => ROLE_RANK[r] > currentRank);
-
-  // Only ADMIN/MANAGER mint brand-new accounts — STAFF's capability is
-  // promoting/demoting EXISTING customers (backend also enforces this).
-  const canCreate = isAdmin || currentRole === "MANAGER";
-  const canDelete = isAdmin;
-  const canEditTarget = (target: User) =>
-    isAdmin || ROLE_RANK[target.role] > currentRank;
-
-  const defaultNewRole =
-    assignableRoles.find((r) => r !== "CUSTOMER") || assignableRoles[0] || "";
-
+  const isManager = currentUser?.role === "MANAGER";
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -69,27 +31,30 @@ export default function AdminUsersPage() {
     name: "",
     email: "",
     phone: "",
-    role: defaultNewRole,
+    role: "STAFF",
     password: "",
   });
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  // ── Staff-tier table (everyone visible except plain customers) ──────────
-  const fetchUsers = useCallback(async () => {
+  const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      // Fetch each visible non-customer role separately and merge, since the
-      // API may not support comma-separated role values. Visibility itself
-      // is also enforced server-side — this just avoids requesting roles we
-      // already know we can't see.
-      const roleQueries = visibleRoles.filter((r) => r !== "CUSTOMER");
+      // Fetch each role separately and merge, since the API may not
+      // support comma-separated role values.
+      // MANAGER never sees ADMIN accounts — the backend also enforces this,
+      // but we skip the request entirely here too.
+      const roleQueries = isManager
+        ? ["MANAGER", "STAFF", "SALES", "ACCOUNTANT"]
+        : ["ADMIN", "MANAGER", "STAFF", "SALES", "ACCOUNTANT"];
+
       const results = await Promise.all(
         roleQueries.map((role) =>
           apiGet<any>("/users", { role, limit: "100" }),
         ),
       );
       const merged = results.flatMap((r) => r.data.users || []);
+      // Deduplicate by id
       const unique = merged.filter(
         (u, i, arr) => arr.findIndex((x) => x.id === u.id) === i,
       );
@@ -99,54 +64,19 @@ export default function AdminUsersPage() {
     } finally {
       setIsLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
 
   useEffect(() => {
     fetchUsers();
-  }, [fetchUsers]);
-
-  // ── Customer lookup (search by name/email, then upgrade their role) ─────
-  const [customerSearch, setCustomerSearch] = useState("");
-  const [customerResults, setCustomerResults] = useState<User[]>([]);
-  const [searchingCustomers, setSearchingCustomers] = useState(false);
-  const [searchedOnce, setSearchedOnce] = useState(false);
-
-  const searchCustomers = async () => {
-    if (!customerSearch.trim()) return;
-    setSearchingCustomers(true);
-    setSearchedOnce(true);
-    try {
-      const res = await apiGet<any>("/users", {
-        role: "CUSTOMER",
-        search: customerSearch.trim(),
-        limit: "20",
-      });
-      setCustomerResults(res.data.users || []);
-    } catch (err) {
-      toast(getApiError(err), "error");
-    } finally {
-      setSearchingCustomers(false);
-    }
-  };
+  }, []);
 
   const openNew = () => {
     setEditItem(null);
-    setForm({
-      name: "",
-      email: "",
-      phone: "",
-      role: defaultNewRole,
-      password: "",
-    });
+    setForm({ name: "", email: "", phone: "", role: "STAFF", password: "" });
     setShowForm(true);
   };
 
   const openEdit = (u: User) => {
-    if (!canEditTarget(u)) {
-      toast("You don't have permission to modify this account", "error");
-      return;
-    }
     setEditItem(u);
     setForm({
       name: u.name,
@@ -168,25 +98,7 @@ export default function AdminUsersPage() {
           phone: form.phone || undefined,
           role: form.role,
         });
-        toast(
-          form.role !== editItem.role
-            ? `${editItem.name} is now ${form.role}`
-            : "User updated",
-          "success",
-        );
-        // Reflect the change immediately wherever this user is showing.
-        setUsers((prev) =>
-          prev
-            .map((u) =>
-              u.id === editItem.id ? { ...u, ...form, role: form.role as User["role"] } : u,
-            )
-            // If they were demoted to CUSTOMER (or promoted out of
-            // visibility), drop them from the staff-tier table.
-            .filter((u) => visibleRoles.includes(u.role) && u.role !== "CUSTOMER"),
-        );
-        setCustomerResults((prev) =>
-          prev.filter((u) => u.id !== editItem.id),
-        );
+        toast("User updated", "success");
       } else {
         await apiPost("/users", {
           name: form.name,
@@ -196,9 +108,9 @@ export default function AdminUsersPage() {
           password: form.password,
         });
         toast("User created", "success");
-        fetchUsers();
       }
       setShowForm(false);
+      fetchUsers();
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -220,38 +132,22 @@ export default function AdminUsersPage() {
   const inputCls =
     "w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500 transition-colors";
 
-  const renderRoleOptions = () =>
-    assignableRoles.map((r) => (
-      <option key={r} value={r}>
-        {r.charAt(0) + r.slice(1).toLowerCase()}
-      </option>
-    ));
-
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">User Management</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {isAdmin
-              ? "Full access — all roles"
-              : `Signed in as ${currentRole.charAt(0) + currentRole.slice(1).toLowerCase()} — you can only manage roles below your own`}
-          </p>
-        </div>
-        {canCreate && (
-          <button
-            onClick={openNew}
-            className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Add User
-          </button>
-        )}
+        <h1 className="text-xl font-bold text-gray-900">Staff & Admin Users</h1>
+        <button
+          onClick={openNew}
+          className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors"
+        >
+          <Plus className="w-4 h-4" /> Add User
+        </button>
       </div>
 
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-100 p-6">
           <h2 className="font-semibold text-gray-900 mb-4">
-            {editItem ? `Edit ${editItem.name}` : "New Staff User"}
+            {editItem ? "Edit User" : "New Staff User"}
           </h2>
           <form onSubmit={handleSubmit} className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -262,10 +158,7 @@ export default function AdminUsersPage() {
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 required
-                disabled={!!editItem}
-                className={
-                  inputCls + (editItem ? " bg-gray-50 text-gray-400" : "")
-                }
+                className={inputCls}
                 placeholder="Jane Doe"
               />
             </div>
@@ -293,10 +186,7 @@ export default function AdminUsersPage() {
                 type="tel"
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                disabled={!!editItem}
-                className={
-                  inputCls + (editItem ? " bg-gray-50 text-gray-400" : "")
-                }
+                className={inputCls}
                 placeholder="+234..."
               />
             </div>
@@ -309,13 +199,13 @@ export default function AdminUsersPage() {
                 onChange={(e) => setForm({ ...form, role: e.target.value })}
                 className={inputCls + " bg-white"}
               >
-                {renderRoleOptions()}
+                <option value="STAFF">Staff</option>
+                <option value="SALES">Sales Manager</option>
+                <option value="MANAGER">Manager</option>
+                <option value="ACCOUNTANT">Accountant</option>
+                {/* Managers cannot assign or see the ADMIN role */}
+                {!isManager && <option value="ADMIN">Admin</option>}
               </select>
-              {editItem && (
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Only roles below your own are selectable.
-                </p>
-              )}
             </div>
             {!editItem && (
               <div className="sm:col-span-2">
@@ -355,71 +245,6 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* ── Customer lookup — find any customer and upgrade their role ──── */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <UserCog className="w-4 h-4 text-gray-400" />
-          <h2 className="font-semibold text-gray-900 text-sm">
-            Find a customer to upgrade
-          </h2>
-        </div>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && searchCustomers()}
-              placeholder="Search by name or email…"
-              className={inputCls + " pl-9"}
-            />
-          </div>
-          <button
-            onClick={searchCustomers}
-            disabled={searchingCustomers || !customerSearch.trim()}
-            className="px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors"
-          >
-            {searchingCustomers ? "Searching…" : "Search"}
-          </button>
-        </div>
-
-        {searchedOnce && !searchingCustomers && (
-          <div className="mt-4 divide-y divide-gray-50">
-            {customerResults.length === 0 ? (
-              <p className="text-xs text-gray-400 py-3">
-                No matching customers found.
-              </p>
-            ) : (
-              customerResults.map((u) => (
-                <div
-                  key={u.id}
-                  className="flex items-center justify-between py-2.5"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-bold text-brand-700 shrink-0">
-                      {u.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-900 text-sm">
-                        {u.name}
-                      </p>
-                      <p className="text-xs text-gray-400">{u.email}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => openEdit(u)}
-                    className="px-3 py-1.5 text-xs font-medium text-brand-700 bg-brand-50 rounded-lg hover:bg-brand-100 transition-colors"
-                  >
-                    Upgrade role
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Staff-tier accounts (peers and below, per role hierarchy) ──── */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -479,24 +304,20 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      {canEditTarget(u) && (
-                        <button
-                          onClick={() => openEdit(u)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          onClick={() => handleDelete(u.id, u.name)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => openEdit(u)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                        title="Edit"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(u.id, u.name)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>

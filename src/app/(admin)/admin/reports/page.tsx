@@ -15,6 +15,8 @@ import {
   Activity as ActivityIcon,
   ChevronLeft,
   ChevronRight,
+  Search,
+  X,
 } from "lucide-react";
 import { apiGet, getApiError } from "@/lib/api";
 import { formatPrice, formatPriceCompact, formatDateTime } from "@/lib/utils";
@@ -146,6 +148,13 @@ export default function ReportsPage() {
     "all",
   );
 
+  // Product search — applies to the stock-movement AND stock-approvals
+  // tabs (both track a specific product's history). Raw input is kept
+  // separate from the applied value so typing doesn't refetch on every
+  // keystroke; it only takes effect on Enter or the Search button.
+  const [productQuery, setProductQuery] = useState("");
+  const [appliedProduct, setAppliedProduct] = useState("");
+
   useEffect(() => {
     if (!isPrivileged) return;
     // Populate the user picker so ADMIN/MANAGER/ACCOUNTANT can pull a
@@ -194,6 +203,7 @@ export default function ReportsPage() {
       page: number,
       filters: AppliedFilters,
       source: "all" | "online" | "pos",
+      productFilter: string,
     ) => {
       setTabLoading(true);
       setTabError("");
@@ -215,6 +225,13 @@ export default function ReportsPage() {
         if (isPrivileged && filters.userId) params.userId = filters.userId;
         // Sales-channel filter only applies to the stock-movement tab.
         if (tab === "stock" && source !== "all") params.source = source;
+        // Product search applies to both stock-related tabs.
+        if (
+          (tab === "stock" || tab === "stock-approvals") &&
+          productFilter.trim()
+        ) {
+          params.product = productFilter.trim();
+        }
 
         const res = await apiGet<any>("/reports", params);
         setTabData(res.data?.[SECTION_KEY[tab]] ?? null);
@@ -235,12 +252,19 @@ export default function ReportsPage() {
   }, [applied, type]);
 
   // Detail tab refetches on tab switch, page change, applied filters, or
-  // (for the stock tab) the sales-channel source filter — this is what
-  // makes the filter bar actually govern the tabbed tables.
+  // (for the stock tab) the sales-channel source filter, or the product
+  // search filter — this is what makes the filter bar actually govern the
+  // tabbed tables.
   useEffect(() => {
-    fetchTab(activeTab, pageByTab[activeTab] || 1, applied, stockSource);
+    fetchTab(
+      activeTab,
+      pageByTab[activeTab] || 1,
+      applied,
+      stockSource,
+      appliedProduct,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, pageByTab[activeTab], applied, stockSource]);
+  }, [activeTab, pageByTab[activeTab], applied, stockSource, appliedProduct]);
 
   const handleGenerate = () => {
     if (interval === "custom" && (!from || !to)) {
@@ -267,6 +291,17 @@ export default function ReportsPage() {
     setPageByTab((prev) => ({ ...prev, stock: 1 }));
   };
 
+  const applyProductSearch = () => {
+    setAppliedProduct(productQuery.trim());
+    setPageByTab((prev) => ({ ...prev, stock: 1, "stock-approvals": 1 }));
+  };
+
+  const clearProductSearch = () => {
+    setProductQuery("");
+    setAppliedProduct("");
+    setPageByTab((prev) => ({ ...prev, stock: 1, "stock-approvals": 1 }));
+  };
+
   const downloadPdf = async () => {
     if (!report) return;
     setExporting(true);
@@ -291,8 +326,13 @@ export default function ReportsPage() {
           ...baseParams,
           type: "stock",
           ...(stockSource !== "all" ? { source: stockSource } : {}),
+          ...(appliedProduct ? { product: appliedProduct } : {}),
         }),
-        apiGet<any>("/reports", { ...baseParams, type: "stock-approvals" }),
+        apiGet<any>("/reports", {
+          ...baseParams,
+          type: "stock-approvals",
+          ...(appliedProduct ? { product: appliedProduct } : {}),
+        }),
         apiGet<any>("/reports", { ...baseParams, type: "activity" }),
       ]);
 
@@ -381,8 +421,9 @@ export default function ReportsPage() {
             : stockSource === "pos"
               ? " — POS"
               : "";
+        const productLabel = appliedProduct ? ` — "${appliedProduct}"` : "";
         doc.text(
-          `Stock Movement (${stock.totalMovements})${sourceLabel}`,
+          `Stock Movement (${stock.totalMovements})${sourceLabel}${productLabel}`,
           14,
           y,
         );
@@ -414,7 +455,11 @@ export default function ReportsPage() {
         }
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
-        doc.text(`Stock Approvals (${approvals.total})`, 14, y);
+        doc.text(
+          `Stock Approvals (${approvals.total})${appliedProduct ? ` — "${appliedProduct}"` : ""}`,
+          14,
+          y,
+        );
         y += 4;
         autoTable(doc, {
           startY: y,
@@ -684,6 +729,40 @@ export default function ReportsPage() {
             </div>
           )}
         </div>
+
+        {/* Product search — find a single product's full inventory
+            history: every addition, sale (online or POS), adjustment, and
+            who was involved. Available on both stock-related tabs. */}
+        {(activeTab === "stock" || activeTab === "stock-approvals") && (
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                value={productQuery}
+                onChange={(e) => setProductQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && applyProductSearch()}
+                placeholder="Search by product name or SKU…"
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500 transition-colors"
+              />
+            </div>
+            <button
+              onClick={applyProductSearch}
+              className="px-3 py-2 bg-gray-900 text-white text-xs font-semibold rounded-xl hover:bg-gray-800 transition-colors"
+            >
+              Search
+            </button>
+            {appliedProduct && (
+              <button
+                onClick={clearProductSearch}
+                className="flex items-center gap-1 px-3 py-2 border border-gray-200 text-xs font-medium text-gray-600 rounded-xl hover:bg-gray-50 transition-colors"
+                title="Clear product filter"
+              >
+                <X className="w-3.5 h-3.5" />
+                {appliedProduct}
+              </button>
+            )}
+          </div>
+        )}
 
         {tabError && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-3">
