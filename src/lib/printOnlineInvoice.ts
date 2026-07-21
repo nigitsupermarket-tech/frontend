@@ -10,7 +10,7 @@
 // queue and cleanup listens on both the top window and the iframe's own
 // window (browsers are inconsistent about which one dispatches `afterprint`
 // when printing was triggered from inside an iframe). See that file's
-// comments for the full history, plus the Blob-URL print-preview hang fix
+// comments for the full history, plus the srcdoc print-preview hang fix
 // documented inline below.
 import type { Order } from "@/types";
 import type { SiteSettings } from "@/types";
@@ -152,7 +152,7 @@ function printViaIframeInternal(html: string, onDone: () => void) {
   iframe.id = "online-order-print-frame";
   iframe.setAttribute(
     "style",
-    "position:fixed;top:-9999px;left:-9999px;width:80mm;height:200mm;border:none;visibility:hidden;",
+    "position:fixed;top:-9999px;left:-9999px;width:80mm;height:200mm;border:none;",
   );
 
   let finished = false;
@@ -183,34 +183,10 @@ function printViaIframeInternal(html: string, onDone: () => void) {
     onDone();
   };
 
-  // BUG FIX ("print preview stuck on 'Loading preview…', Print button does
-  // nothing"): this used to load the receipt via a Blob URL (`iframe.src`).
-  // Blob URLs are scoped to the renderer process/tab that created them —
-  // Chrome's print-preview pane (especially for "Microsoft Print to
-  // PDF"/"Save as PDF") generates the preview in a separate process that
-  // can fail to dereference that blob: URL, which hangs the preview
-  // indefinitely and leaves the Print button non-functional. It's a known
-  // Chromium quirk, not something specific to this order.
-  //
-  // Fix: append the (empty) iframe to the DOM first, then write the HTML
-  // directly into its document with document.write — no blob, no
-  // navigation, so there's nothing for the preview process to fail to
-  // fetch. This also sidesteps the ORIGINAL reason this code moved to Blob
-  // URLs in the first place (relying on `iframe.onload`, which had already
-  // fired for the initial about:blank document by the time the handler was
-  // attached on repeat calls) — document.write populates the iframe
-  // synchronously, so we don't need `onload` at all.
-  document.body.appendChild(iframe);
-  const doc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!doc) {
-    cleanup();
-    return;
-  }
-  doc.open();
-  doc.write(html);
-  doc.close();
-
-  setTimeout(() => {
+  let printed = false;
+  const doPrint = () => {
+    if (printed) return; // guard against onload firing in addition to the fallback timer
+    printed = true;
     try {
       const win = iframe.contentWindow;
       if (!win) {
@@ -226,7 +202,15 @@ function printViaIframeInternal(html: string, onDone: () => void) {
       return;
     }
     fallbackTimer = setTimeout(cleanup, 15_000);
-  }, 250);
+  };
+
+  iframe.onload = () => setTimeout(doPrint, 50);
+  iframe.srcdoc = html;
+  document.body.appendChild(iframe);
+
+  // Fallback in case `onload` never fires for some reason (some older
+  // browsers are inconsistent about firing load for srcdoc content).
+  fallbackTimer = setTimeout(doPrint, 1000);
 }
 
 export function printOnlineOrderInvoice(
