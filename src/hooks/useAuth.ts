@@ -17,7 +17,10 @@ export function useAuth() {
     console.log("[useAuth] login() called | redirectTo=", redirectTo);
     try {
       await store.login(payload);
-      console.log("[useAuth] store.login() done | isAuthenticated=", useAuthStore.getState().isAuthenticated);
+      console.log(
+        "[useAuth] store.login() done | isAuthenticated=",
+        useAuthStore.getState().isAuthenticated,
+      );
 
       await mergeCart();
       console.log("[useAuth] mergeCart() done");
@@ -67,7 +70,8 @@ export function useAuth() {
     isAuthenticated: store.isAuthenticated,
     isLoading: store.isLoading,
     isAdmin: store.user?.role === "ADMIN",
-    isStaffOrAdmin: store.user?.role === "ADMIN" || store.user?.role === "STAFF",
+    isStaffOrAdmin:
+      store.user?.role === "ADMIN" || store.user?.role === "STAFF",
     login,
     register,
     logout,
