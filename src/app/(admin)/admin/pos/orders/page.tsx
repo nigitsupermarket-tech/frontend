@@ -95,7 +95,12 @@ function buildReceiptHtml(
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <style>
-      @page { size: 80mm auto; margin: 2mm 0; }
+      /* size: 80mm 297mm — NOT "80mm auto". See printOnlineInvoice.ts for
+         the full explanation: "auto" height can hang Chrome's print-preview
+         pagination on fixed-page destinations like Print to PDF, even
+         though it works fine on a real thermal printer's roll-paper
+         driver. A generously tall fixed height works on both. */
+      @page { size: 80mm 297mm; margin: 2mm 0; }
       * { 
         box-sizing: border-box; 
         margin: 0; 
