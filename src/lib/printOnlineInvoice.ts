@@ -4,13 +4,14 @@
 // printer (see admin/pos/orders/page.tsx's buildReceiptHtml/printViaIframe),
 // with an "ONLINE ORDER" badge so the two are never confused at a glance.
 //
-// The print engine here is a copy of the queued-iframe implementation from
-// the POS orders list: a plain iframe + window.print() can silently stop
-// firing on rapid repeated clicks unless print jobs are serialized through a
-// FIFO queue and cleanup listens on both the top window and the iframe's own
+// The print engine here mirrors the queued-iframe implementation from the
+// POS orders list: a plain iframe + window.print() can silently stop firing
+// on rapid repeated clicks unless print jobs are serialized through a FIFO
+// queue and cleanup listens on both the top window and the iframe's own
 // window (browsers are inconsistent about which one dispatches `afterprint`
 // when printing was triggered from inside an iframe). See that file's
-// comments for the full history of why this shape is necessary.
+// comments for the full history, plus the Blob-URL print-preview hang fix
+// documented inline below.
 import type { Order } from "@/types";
 import type { SiteSettings } from "@/types";
 
@@ -139,9 +140,6 @@ function printViaIframeInternal(html: string, onDone: () => void) {
     /* ignore */
   }
 
-  const blob = new Blob([html], { type: "text/html" });
-  const blobUrl = URL.createObjectURL(blob);
-
   const iframe = document.createElement("iframe");
   iframe.id = "online-order-print-frame";
   iframe.setAttribute(
@@ -174,36 +172,53 @@ function printViaIframeInternal(html: string, onDone: () => void) {
     } catch (_) {
       /* already removed — ignore */
     }
-    try {
-      URL.revokeObjectURL(blobUrl);
-    } catch (_) {
-      /* ignore */
-    }
     onDone();
   };
 
-  iframe.onload = () => {
-    setTimeout(() => {
-      try {
-        const win = iframe.contentWindow;
-        if (!win) {
-          cleanup();
-          return;
-        }
-        win.focus();
-        window.addEventListener("afterprint", cleanup, { once: true });
-        win.addEventListener("afterprint", cleanup, { once: true });
-        win.print();
-      } catch (_) {
+  // BUG FIX ("print preview stuck on 'Loading preview…', Print button does
+  // nothing"): this used to load the receipt via a Blob URL (`iframe.src`).
+  // Blob URLs are scoped to the renderer process/tab that created them —
+  // Chrome's print-preview pane (especially for "Microsoft Print to
+  // PDF"/"Save as PDF") generates the preview in a separate process that
+  // can fail to dereference that blob: URL, which hangs the preview
+  // indefinitely and leaves the Print button non-functional. It's a known
+  // Chromium quirk, not something specific to this order.
+  //
+  // Fix: append the (empty) iframe to the DOM first, then write the HTML
+  // directly into its document with document.write — no blob, no
+  // navigation, so there's nothing for the preview process to fail to
+  // fetch. This also sidesteps the ORIGINAL reason this code moved to Blob
+  // URLs in the first place (relying on `iframe.onload`, which had already
+  // fired for the initial about:blank document by the time the handler was
+  // attached on repeat calls) — document.write populates the iframe
+  // synchronously, so we don't need `onload` at all.
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    cleanup();
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    try {
+      const win = iframe.contentWindow;
+      if (!win) {
         cleanup();
         return;
       }
-      fallbackTimer = setTimeout(cleanup, 15_000);
-    }, 250);
-  };
-
-  iframe.src = blobUrl;
-  document.body.appendChild(iframe);
+      win.focus();
+      window.addEventListener("afterprint", cleanup, { once: true });
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.print();
+    } catch (_) {
+      cleanup();
+      return;
+    }
+    fallbackTimer = setTimeout(cleanup, 15_000);
+  }, 250);
 }
 
 export function printOnlineOrderInvoice(

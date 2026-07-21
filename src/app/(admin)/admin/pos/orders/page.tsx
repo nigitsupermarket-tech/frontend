@@ -158,13 +158,15 @@ function buildReceiptHtml(
 }
 
 // ── Print via hidden iframe (no popup blocker issues) ────────────────────────
-// IMPORTANT: We load the receipt via a Blob URL (`iframe.src`) rather than
-// `document.write()`. With `document.write()`, the iframe's `load` event has
-// already fired (for the initial about:blank document) by the time we attach
-// `iframe.onload` — this works "by luck" on the very first call of a page
-// session, but on subsequent calls the browser doesn't re-fire `load`, so the
-// print is silently never triggered. A Blob URL assigned to `src` reliably
-// fires `load` every single time.
+// This used to load the receipt via a Blob URL (`iframe.src`) rather than
+// `document.write()`, specifically to work around `iframe.onload` firing on
+// the initial about:blank document before the handler was attached (worked
+// "by luck" on the first call, silently broke on repeat calls). It has since
+// moved BACK to `document.write()` — see the Blob-URL print-preview hang fix
+// documented inline in `printViaIframeInternal` below — but now avoids the
+// onload staleness bug a different way: writing the HTML directly into the
+// iframe's document happens synchronously, so nothing waits on `onload` at
+// all anymore.
 //
 // BUG FIX ("print stops working after frequent clicks"): two things were
 // happening together:
@@ -213,9 +215,6 @@ function printViaIframeInternal(html: string, onDone: () => void) {
     /* ignore */
   }
 
-  const blob = new Blob([html], { type: "text/html" });
-  const blobUrl = URL.createObjectURL(blob);
-
   const iframe = document.createElement("iframe");
   iframe.id = "pos-print-frame";
   iframe.setAttribute(
@@ -248,40 +247,50 @@ function printViaIframeInternal(html: string, onDone: () => void) {
     } catch (_) {
       /* already removed — ignore */
     }
-    try {
-      URL.revokeObjectURL(blobUrl);
-    } catch (_) {
-      /* ignore */
-    }
     onDone();
   };
 
-  iframe.onload = () => {
-    setTimeout(() => {
-      try {
-        const win = iframe.contentWindow;
-        if (!win) {
-          cleanup();
-          return;
-        }
-        win.focus();
-        // Listen on BOTH the top window and the iframe's window — different
-        // browsers dispatch `afterprint` to different targets when the
-        // print was triggered from an iframe. First one to fire wins.
-        window.addEventListener("afterprint", cleanup, { once: true });
-        win.addEventListener("afterprint", cleanup, { once: true });
-        win.print();
-      } catch (_) {
+  // BUG FIX ("print preview stuck on 'Loading preview…'"): this used to
+  // load the receipt via a Blob URL (`iframe.src`). Blob URLs are scoped to
+  // the renderer process/tab that created them — Chrome's print-preview
+  // pane (especially "Microsoft Print to PDF"/"Save as PDF") generates the
+  // preview in a separate process that can fail to dereference that blob:
+  // URL, hanging the preview indefinitely. Writing the HTML directly into
+  // the iframe's document instead avoids the blob entirely, and also
+  // sidesteps the original `iframe.onload` staleness bug (document.write
+  // populates the iframe synchronously, so `onload` timing no longer
+  // matters).
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    cleanup();
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  setTimeout(() => {
+    try {
+      const win = iframe.contentWindow;
+      if (!win) {
         cleanup();
         return;
       }
-      // Hard fallback in case `afterprint` never fires on either target
-      fallbackTimer = setTimeout(cleanup, 15_000);
-    }, 250);
-  };
-
-  iframe.src = blobUrl;
-  document.body.appendChild(iframe);
+      win.focus();
+      // Listen on BOTH the top window and the iframe's window — different
+      // browsers dispatch `afterprint` to different targets when the
+      // print was triggered from an iframe. First one to fire wins.
+      window.addEventListener("afterprint", cleanup, { once: true });
+      win.addEventListener("afterprint", cleanup, { once: true });
+      win.print();
+    } catch (_) {
+      cleanup();
+      return;
+    }
+    // Hard fallback in case `afterprint` never fires on either target
+    fallbackTimer = setTimeout(cleanup, 15_000);
+  }, 250);
 }
 
 // ── Print BOTH copies: customer copy first, then merchant (in-house) copy ────
