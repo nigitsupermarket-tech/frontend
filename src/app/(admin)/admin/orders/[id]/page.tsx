@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import axios from "axios";
 import {
   ArrowLeft,
   Loader2,
@@ -14,8 +15,10 @@ import {
   Building2,
   ImageIcon,
   Printer,
+  Download,
   Send,
   Bell,
+  RefreshCcw,
 } from "lucide-react";
 import { Order } from "@/types";
 import { apiGet, apiPut, apiPost, getApiError } from "@/lib/api";
@@ -31,7 +34,10 @@ import { PageLoader, ErrorState } from "@/components/shared/loading-spinner";
 import { useToast } from "@/store/uiStore";
 import { useAuth } from "@/hooks/useAuth";
 import { useSettings } from "@/hooks/useSettings";
-import { printOnlineOrderInvoice } from "@/lib/printOnlineInvoice";
+import {
+  printOnlineOrderInvoice,
+  downloadOnlineInvoicePdf,
+} from "@/lib/printOnlineInvoice";
 import Image from "next/image";
 
 const ORDER_STATUSES = [
@@ -75,8 +81,23 @@ interface TrackingUpdate {
   timestamp: string;
 }
 
+const FETCH_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("TIMEOUT: request took too long")),
+        ms,
+      ),
+    ),
+  ]);
+}
+
 export default function AdminOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,13 +123,22 @@ export default function AdminOrderDetailPage() {
   const [sendingInvoice, setSendingInvoice] = useState(false);
   const [notifying, setNotifying] = useState(false);
 
+  // DYNAMIC ORDER-TYPE HANDLING: mirrors admin/pos/orders/[id]/page.tsx — an
+  // ID landing here isn't guaranteed to be an online order (Order and
+  // POSOrder are separate collections). On a genuine 404 here, check
+  // whether it's actually a POS order before giving up, and hand off to
+  // that page if so. Also bounds the fetch to FETCH_TIMEOUT_MS so this can
+  // never spin on "Loading…" forever regardless of what the backend does.
   const loadOrder = () => {
     setIsLoading(true);
+    setError(null);
     Promise.all([
-      apiGet<any>(`/orders/${id}`),
-      apiGet<any>(`/orders/${id}/tracking`).catch(() => ({
-        data: { order: { trackingUpdates: [] } },
-      })),
+      withTimeout(apiGet<any>(`/orders/${id}`), FETCH_TIMEOUT_MS),
+      withTimeout(apiGet<any>(`/orders/${id}/tracking`), FETCH_TIMEOUT_MS).catch(
+        () => ({
+          data: { order: { trackingUpdates: [] } },
+        }),
+      ),
     ])
       .then(([oRes, tRes]) => {
         const o = oRes.data.order;
@@ -118,7 +148,29 @@ export default function AdminOrderDetailPage() {
         setTrackingUrl(o.trackingUrl || "");
         setTrackingUpdates(tRes.data.order?.trackingUpdates || []);
       })
-      .catch(() => setError("Order not found"))
+      .catch(async (err: any) => {
+        const is404 = axios.isAxiosError(err) && err.response?.status === 404;
+        if (is404) {
+          try {
+            await withTimeout(
+              apiGet<any>(`/pos/orders/${id}`),
+              FETCH_TIMEOUT_MS,
+            );
+            router.replace(`/admin/pos/orders/${id}`);
+            return;
+          } catch {
+            setError("This order was not found as an online order or a POS order.");
+          }
+        } else if (err?.message?.startsWith("TIMEOUT")) {
+          console.error("Online order fetch timed out:", { id, err });
+          setError(
+            "The server took too long to respond. Check your connection and try again.",
+          );
+        } else {
+          console.error("Online order fetch failed:", { id, err });
+          setError(getApiError(err));
+        }
+      })
       .finally(() => setIsLoading(false));
   };
 
@@ -222,8 +274,23 @@ export default function AdminOrderDetailPage() {
   if (isLoading) return <PageLoader />;
   if (error || !order)
     return (
-      <div className="p-6">
+      <div className="p-6 space-y-4">
         <ErrorState message={error || "Not found"} />
+        <div className="flex justify-center gap-3">
+          <button
+            type="button"
+            onClick={loadOrder}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
+          >
+            <RefreshCcw className="w-4 h-4" /> Retry
+          </button>
+          <Link
+            href="/admin/orders"
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to Orders
+          </Link>
+        </div>
       </div>
     );
 
@@ -259,6 +326,13 @@ export default function AdminOrderDetailPage() {
               <Printer className="w-3.5 h-3.5" />
             )}{" "}
             Print Invoice
+          </button>
+          <button
+            onClick={() => downloadOnlineInvoicePdf(order, settings)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            title="Download as a PDF file — use this if Print Invoice's preview won't load"
+          >
+            <Download className="w-3.5 h-3.5" /> Download
           </button>
           <span
             className={`px-3 py-1 rounded-full text-sm font-medium ${ORDER_STATUS_COLORS[order.status]}`}

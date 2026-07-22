@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, Eye, Printer, Loader2 } from "lucide-react";
+import { Search, Eye, Printer, Download, Loader2 } from "lucide-react";
 import { Order, Pagination } from "@/types";
 import { apiGet } from "@/lib/api";
 import {
@@ -18,7 +18,10 @@ import {
   ErrorState,
 } from "@/components/shared/loading-spinner";
 import { useSettings } from "@/hooks/useSettings";
-import { printOnlineOrderInvoice } from "@/lib/printOnlineInvoice";
+import {
+  printOnlineOrderInvoice,
+  downloadOnlineInvoicePdf,
+} from "@/lib/printOnlineInvoice";
 
 const statusOptions = [
   "",
@@ -48,6 +51,13 @@ export default function AdminOrdersPage() {
     if (printingOrderId) return; // already printing something — ignore extra clicks
     setPrintingOrderId(order.id);
     printOnlineOrderInvoice(order, settings, () => setPrintingOrderId(null));
+  };
+
+  // Downloads a real PDF file — no browser print dialog at all, so it can't
+  // be affected by the "print-preview hangs" class of bug some Chrome/
+  // Windows setups hit. Use this when Print Invoice's preview won't load.
+  const handleDownload = (order: Order) => {
+    downloadOnlineInvoicePdf(order, settings);
   };
 
   const fetchOrders = async () => {
@@ -211,6 +221,13 @@ export default function AdminOrdersPage() {
                           ) : (
                             <Printer className="w-3.5 h-3.5" />
                           )}
+                        </button>
+                        <button
+                          onClick={() => handleDownload(order)}
+                          title="Download invoice PDF"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
                         </button>
                         <Link
                           href={`/admin/orders/${order.id}`}

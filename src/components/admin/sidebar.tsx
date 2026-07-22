@@ -1,9 +1,13 @@
 "use client";
 // frontend/src/components/admin/sidebar.tsx
 // Role-aware sidebar:
-//   ADMIN  — everything
-//   STAFF  — POS, products, orders, inventory (no customers user management, no POS sessions, no settings)
-//   SALES  — POS, orders, customers (no user mgmt), marketing, analytics
+//   ADMIN   — everything
+//   MANAGER — everything except ADMIN-only areas; user management scoped to
+//             roles below MANAGER (see backend/src/utils/roleHierarchy.ts)
+//   STAFF   — POS, products, orders, inventory, and user management scoped
+//             to roles below STAFF (ACCOUNTANT/SALES/CUSTOMER) — no POS
+//             sessions, no settings
+//   SALES   — POS, orders, customers (no user mgmt), marketing, analytics
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -317,9 +321,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   // Apply role-specific child filtering
   visibleItems = visibleItems.map((item) => {
-    // Customers: STAFF and SALES cannot see User Management.
-    // MANAGER and ADMIN can.
-    if (item.label === "Customers" && (role === "STAFF" || role === "SALES")) {
+    // Customers: only ADMIN/MANAGER/STAFF get "User Management" — they can
+    // upgrade/demote customers within their own rank in the role hierarchy.
+    // SALES never gets user management access.
+    if (item.label === "Customers" && role === "SALES") {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "User Management"),
