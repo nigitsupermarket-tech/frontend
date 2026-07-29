@@ -21,21 +21,30 @@ export function ProductCard({ product, className }: ProductCardProps) {
   // ── Scalable product state ─────────────────────────────────────────────────
   const isScalable = !!product.isScalable;
   const unit = product.scaleUnit || "unit";
-  const step = product.scaleStep || 0.1;
-  const minQty = product.minOrderQty || step;
+  const step = product.scaleStep ?? 0.1;
+  // Preset-only mode: scaleStep is 0, so there's no +/- increment — the
+  // customer must tap one of the preset weights below.
+  const presetOnly = isScalable && step === 0;
+  const minQty = product.minOrderQty || (presetOnly ? 0 : step);
   const maxQty =
     product.maxOrderQty ||
     (product.trackInventory ? product.stockQuantity : 9999);
   const presets = product.scalePresets?.length ? product.scalePresets : [];
 
   // For scalable: quantity is a float (kg, L, etc.). For fixed: integer.
-  const [quantity, setQuantity] = useState(isScalable ? minQty : 1);
+  // In preset-only mode we start unselected (0) so "Add" stays disabled
+  // until the customer explicitly taps a preset.
+  const [quantity, setQuantity] = useState(
+    isScalable ? (presetOnly ? 0 : minQty) : 1,
+  );
+  const hasSelection = !presetOnly || quantity > 0;
 
   // parseFloat + toFixed(10) avoids floating-point drift (e.g. 0.1+0.1+0.1 ≠ 0.3)
   const roundStep = (val: number) =>
     parseFloat((Math.round(val / step) * step).toFixed(10));
 
   const decrement = () => {
+    if (presetOnly) return; // no increment in preset-only mode
     if (isScalable) {
       setQuantity((q) => Math.max(minQty, roundStep(q - step)));
     } else {
@@ -44,6 +53,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
   };
 
   const increment = () => {
+    if (presetOnly) return; // no increment in preset-only mode
     if (isScalable) {
       setQuantity((q) => Math.min(maxQty, roundStep(q + step)));
     } else {
@@ -71,6 +81,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
   const handleAdd = async () => {
     if (isOutOfStock) return;
+    if (presetOnly && quantity <= 0) return; // must tap a preset first
     await addToCart(product.id, quantity, {
       price:
         isScalable && product.pricePerUnit
@@ -97,14 +108,23 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const showStars = hasReviews && rating >= 4;
   const filledStars = showStars ? Math.round(rating) : 0;
 
-  const qtyDisplay = isScalable
-    ? `${quantity % 1 === 0 ? quantity.toFixed(0) : quantity.toFixed(1)} ${unit}`
-    : String(quantity);
+  const qtyDisplay =
+    presetOnly && quantity <= 0
+      ? "Select"
+      : isScalable
+        ? `${quantity % 1 === 0 ? quantity.toFixed(0) : quantity.toFixed(1)} ${unit}`
+        : String(quantity);
 
-  const atMin = isScalable ? quantity <= minQty : quantity <= 1;
-  const atMax = isScalable
-    ? quantity >= maxQty
-    : product.trackInventory && quantity >= product.stockQuantity;
+  const atMin = presetOnly
+    ? true
+    : isScalable
+      ? quantity <= minQty
+      : quantity <= 1;
+  const atMax = presetOnly
+    ? true
+    : isScalable
+      ? quantity >= maxQty
+      : product.trackInventory && quantity >= product.stockQuantity;
 
   return (
     <div
@@ -221,63 +241,80 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
           {/* ── Scalable presets ── */}
           {isScalable && presets.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {presets.slice(0, 4).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setQuantity(p)}
-                  className={cn(
-                    "text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded border transition-colors",
-                    quantity === p
-                      ? "bg-green-600 text-white border-green-600"
-                      : "border-gray-300 text-gray-600 hover:border-green-500",
-                  )}
-                >
-                  {p}
-                  {unit}
-                </button>
-              ))}
+            <div className="flex flex-col gap-0.5">
+              {presetOnly && (
+                <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide">
+                  Select weight:
+                </span>
+              )}
+              <div className="flex flex-wrap gap-1">
+                {presets.slice(0, 4).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setQuantity(p)}
+                    className={cn(
+                      "text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded border transition-colors",
+                      quantity === p
+                        ? "bg-green-600 text-white border-green-600"
+                        : "border-gray-300 text-gray-600 hover:border-green-500",
+                    )}
+                  >
+                    {p}
+                    {unit}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
-          {/* QTY / scale selector */}
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-1">
-              <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
-                {isScalable ? "AMT:" : "QTY:"}
-              </span>
-              <div className="flex items-center border border-gray-300">
-                <button
-                  onClick={decrement}
-                  className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                  disabled={atMin}
-                >
-                  <Minus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-                </button>
-                <span className="w-10 sm:w-12 text-center text-[9px] sm:text-[10px] font-medium text-gray-800 px-0.5">
-                  {qtyDisplay}
+          {/* QTY / scale selector — hidden in preset-only mode (scaleStep = 0):
+              no +/- increment is offered, the presets above are the only way
+              to choose a quantity. */}
+          {!presetOnly && (
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
+                  {isScalable ? "AMT:" : "QTY:"}
                 </span>
-                <button
-                  onClick={increment}
-                  disabled={atMax}
-                  className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
-                </button>
+                <div className="flex items-center border border-gray-300">
+                  <button
+                    onClick={decrement}
+                    className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                    disabled={atMin}
+                  >
+                    <Minus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                  </button>
+                  <span className="w-10 sm:w-12 text-center text-[9px] sm:text-[10px] font-medium text-gray-800 px-0.5">
+                    {qtyDisplay}
+                  </span>
+                  <button
+                    onClick={increment}
+                    disabled={atMax}
+                    className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                  </button>
+                </div>
               </div>
-            </div>
-            {isScalable && product.trackInventory && quantity >= maxQty && (
-              <p className="text-[8px] sm:text-[9px] text-orange-500 font-medium leading-tight">
-                Max: {product.stockQuantity} {unit} available
-              </p>
-            )}
-            {!isScalable &&
-              product.trackInventory &&
-              quantity >= product.stockQuantity && (
-                <p className="text-[8px] sm:text-[9px] text-red-500 font-medium leading-tight">
-                  Max stock reached ({product.stockQuantity} available)
+              {isScalable && product.trackInventory && quantity >= maxQty && (
+                <p className="text-[8px] sm:text-[9px] text-orange-500 font-medium leading-tight">
+                  Max: {product.stockQuantity} {unit} available
                 </p>
               )}
+              {!isScalable &&
+                product.trackInventory &&
+                quantity >= product.stockQuantity && (
+                  <p className="text-[8px] sm:text-[9px] text-red-500 font-medium leading-tight">
+                    Max stock reached ({product.stockQuantity} available)
+                  </p>
+                )}
+            </div>
+          )}
+          {presetOnly && quantity > 0 && (
+            <p className="text-[8px] sm:text-[9px] text-gray-500 font-medium leading-tight">
+              Selected: {qtyDisplay}
+            </p>
+          )}
           </div>
 
           {/* Price */}
@@ -305,18 +342,27 @@ export function ProductCard({ product, className }: ProductCardProps) {
             </Link>
             <button
               onClick={handleAdd}
-              disabled={isOutOfStock || cartLoading}
+              disabled={isOutOfStock || cartLoading || !hasSelection}
+              title={
+                !hasSelection ? "Select a preset weight first" : undefined
+              }
               className={cn(
                 "flex items-center justify-center gap-1 py-1.5 rounded text-[9px] sm:text-xs font-bold uppercase tracking-wide transition-all w-full",
                 addedFeedback
                   ? "bg-green-600 text-white"
-                  : isOutOfStock
+                  : isOutOfStock || !hasSelection
                     ? "bg-gray-200 text-gray-400 cursor-not-allowed"
                     : "bg-amber-400 hover:bg-amber-500 text-gray-900",
               )}
             >
               <ShoppingCart className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              {addedFeedback ? "Added!" : isOutOfStock ? "Sold Out" : "ADD"}
+              {addedFeedback
+                ? "Added!"
+                : isOutOfStock
+                  ? "Sold Out"
+                  : !hasSelection
+                    ? "Select"
+                    : "ADD"}
             </button>
           </div>
         </div>

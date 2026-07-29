@@ -17,6 +17,40 @@ import { Category, Brand } from "@/types";
 import { PageLoader } from "@/components/shared/loading-spinner";
 import { DragDropMediaUploader } from "@/components/shared/drag-drop-media-uploader";
 
+// A structured, labeled preset of a scalable product — e.g. "500g Pack",
+// "1kg Bag" — with its OWN price and optional dedicated stock. `_key` is a
+// client-only identity for React lists / form editing; `id` is only present
+// once the variation has actually been saved to the database.
+interface VariationDraft {
+  _key: string;
+  id?: string;
+  label: string;
+  quantity: string; // kept as string while editing, parsed to Float on submit
+  price: string;
+  compareAtPrice: string;
+  barcode: string;
+  dedicatedStock: boolean;
+  stockQuantity: string; // only used when dedicatedStock is true
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+const makeVariationKey = () =>
+  `v_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const emptyVariation = (): VariationDraft => ({
+  _key: makeVariationKey(),
+  label: "",
+  quantity: "",
+  price: "",
+  compareAtPrice: "",
+  barcode: "",
+  dedicatedStock: false,
+  stockQuantity: "",
+  isDefault: false,
+  isActive: true,
+});
+
 interface Props {
   productId?: string;
   onSave?: () => void;
@@ -240,6 +274,7 @@ export default function ProductForm({ productId, onSave }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [form, setForm] = useState(emptyForm);
+  const [variations, setVariations] = useState<VariationDraft[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
 
   useEffect(() => {
@@ -329,9 +364,35 @@ export default function ProductForm({ productId, onSave }: Props) {
             pricePerUnit: String(p.pricePerUnit || ""),
             minOrderQty: String(p.minOrderQty || "0.1"),
             maxOrderQty: String(p.maxOrderQty || ""),
-            scaleStep: String(p.scaleStep || "0.1"),
+            scaleStep: String(p.scaleStep ?? "0.1"),
             scalePresets: (p.scalePresets || []).join(", "),
           });
+
+          setVariations(
+            (p.variations || [])
+              .slice()
+              .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+              .map((v: any) => ({
+                _key: makeVariationKey(),
+                id: v.id,
+                label: v.label || "",
+                quantity: String(v.quantity ?? ""),
+                price: String(v.price ?? ""),
+                compareAtPrice:
+                  v.compareAtPrice !== null && v.compareAtPrice !== undefined
+                    ? String(v.compareAtPrice)
+                    : "",
+                barcode: v.barcode || "",
+                dedicatedStock:
+                  v.stockQuantity !== null && v.stockQuantity !== undefined,
+                stockQuantity:
+                  v.stockQuantity !== null && v.stockQuantity !== undefined
+                    ? String(v.stockQuantity)
+                    : "",
+                isDefault: !!v.isDefault,
+                isActive: v.isActive !== false,
+              })),
+          );
         }
       } catch (err) {
         toast.error(getApiError(err));
@@ -350,6 +411,24 @@ export default function ProductForm({ productId, onSave }: Props) {
       ...prev,
       nutritionalInfo: { ...prev.nutritionalInfo, [key]: value },
     }));
+
+  // ── Structured variation manager helpers ──────────────────────────────
+  const addVariationRow = () =>
+    setVariations((prev) => [...prev, emptyVariation()]);
+
+  const updateVariationRow = (key: string, patch: Partial<VariationDraft>) =>
+    setVariations((prev) =>
+      prev.map((v) => (v._key === key ? { ...v, ...patch } : v)),
+    );
+
+  const removeVariationRow = (key: string) =>
+    setVariations((prev) => prev.filter((v) => v._key !== key));
+
+  // Only one variation can be the "starting preset" at a time.
+  const setDefaultVariationRow = (key: string) =>
+    setVariations((prev) =>
+      prev.map((v) => ({ ...v, isDefault: v._key === key })),
+    );
 
   const handleSave = async () => {
     if (!form.name || !form.price || !form.sku || !form.categoryId || !form.barcode) {
@@ -392,11 +471,34 @@ export default function ProductForm({ productId, onSave }: Props) {
         return;
       }
 
-      // scaleStep required and positive
-      if (!form.scaleStep || parseFloat(form.scaleStep) <= 0) {
-        toast.error(`Scale step must be greater than 0 (e.g. 0.1 or 1)`);
+      // scaleStep required and non-negative.
+      // A step of 0 is a deliberate, valid setting — it switches the
+      // product into "preset-only" mode: no +/- increment is offered on
+      // POS or the online store, and customers/cashiers must tap one of
+      // the Preset Weights below instead.
+      if (form.scaleStep === "" || form.scaleStep === null || isNaN(parseFloat(form.scaleStep))) {
+        toast.error(`Scale step is required (enter 0 for preset-only weights, e.g. 0.1 for increments)`);
         setActiveTab("scalable");
         return;
+      }
+      if (parseFloat(form.scaleStep) < 0) {
+        toast.error(`Scale step cannot be negative`);
+        setActiveTab("scalable");
+        return;
+      }
+      const isPresetOnly = parseFloat(form.scaleStep) === 0;
+      if (isPresetOnly) {
+        const presetVals = (form.scalePresets || "")
+          .split(",")
+          .map((v) => parseFloat(v.trim()))
+          .filter((v) => !isNaN(v));
+        if (presetVals.length === 0) {
+          toast.error(
+            `Scale Step is 0 (preset-only mode) — add at least one Preset Weight so customers and cashiers have something to select`,
+          );
+          setActiveTab("scalable");
+          return;
+        }
       }
 
       // minOrderQty must be positive
@@ -474,6 +576,42 @@ export default function ProductForm({ productId, onSave }: Props) {
 
       // Stock quantity for scalable products should reflect total units available
       // Warn if stock = 0 but don't block (it might be intentional)
+    }
+
+    // ── Structured variation validation ───────────────────────────────────
+    if (form.isScalable && variations.length > 0) {
+      const activeVariations = variations.filter((v) => v.label.trim());
+      for (const v of activeVariations) {
+        if (!v.quantity || parseFloat(v.quantity) <= 0) {
+          toast.error(`"${v.label}" needs a quantity greater than 0`);
+          setActiveTab("scalable");
+          return;
+        }
+        if (!v.price || parseFloat(v.price) < 0) {
+          toast.error(`"${v.label}" needs a valid price`);
+          setActiveTab("scalable");
+          return;
+        }
+        if (v.dedicatedStock && (v.stockQuantity === "" || parseFloat(v.stockQuantity) < 0)) {
+          toast.error(`"${v.label}" has dedicated stock enabled but no valid stock quantity`);
+          setActiveTab("scalable");
+          return;
+        }
+      }
+      const labels = activeVariations.map((v) => v.label.trim().toLowerCase());
+      const dupLabel = labels.find((l, i) => labels.indexOf(l) !== i);
+      if (dupLabel) {
+        toast.error(`Two variations are both labeled "${dupLabel}" — labels must be unique`);
+        setActiveTab("scalable");
+        return;
+      }
+      const barcodes = activeVariations.map((v) => v.barcode.trim()).filter(Boolean);
+      const dupBarcode = barcodes.find((b, i) => barcodes.indexOf(b) !== i);
+      if (dupBarcode) {
+        toast.error(`Barcode "${dupBarcode}" is used by more than one variation on this product`);
+        setActiveTab("scalable");
+        return;
+      }
     }
 
     // ── Stock quantity cannot be negative ─────────────────────────────────
@@ -648,6 +786,27 @@ export default function ProductForm({ productId, onSave }: Props) {
         scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
         scalePresets: form.isScalable && form.scalePresets
           ? form.scalePresets.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v))
+          : [],
+        // Structured, individually-priced presets (e.g. "500g Pack")
+        variations: form.isScalable
+          ? variations
+              .filter((v) => v.label.trim())
+              .map((v) => ({
+                id: v.id,
+                label: v.label.trim(),
+                quantity: parseFloat(v.quantity),
+                price: parseFloat(v.price),
+                compareAtPrice: v.compareAtPrice
+                  ? parseFloat(v.compareAtPrice)
+                  : null,
+                barcode: v.barcode.trim() || null,
+                stockQuantity:
+                  v.dedicatedStock && v.stockQuantity !== ""
+                    ? parseFloat(v.stockQuantity)
+                    : null,
+                isDefault: v.isDefault,
+                isActive: v.isActive,
+              }))
           : [],
       };
 
@@ -1008,8 +1167,23 @@ export default function ProductForm({ productId, onSave }: Props) {
                     value={form.scaleStep}
                     onChange={(v) => setField("scaleStep", v)}
                     placeholder="0.1"
-                    hint={`How much each +/− moves the quantity (e.g. 0.1 ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit})`}
+                    hint={
+                      parseFloat(form.scaleStep) === 0
+                        ? "Set to 0 for preset-only weights — no +/− increment on POS or the online store"
+                        : `How much each +/− moves the quantity (e.g. 0.1 ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit})`
+                    }
                   />
+                </div>
+
+                {/* ── Preset-only mode notice ── */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800 space-y-1">
+                  <p className="font-semibold">ℹ️ About Scale Step = 0 (preset-only weights)</p>
+                  <p className="text-blue-700">
+                    If <strong>Scale Step</strong> is set to <strong>0</strong>, the +/− increment buttons are removed on both
+                    the <strong>online store</strong> and the <strong>POS cashier screen</strong>. Customers and cashiers will
+                    only be able to select one of the <strong>Preset Weights</strong> configured below — no manual increment
+                    or typed-in quantity will be allowed. Make sure at least one Preset Weight is set whenever Scale Step is 0.
+                  </p>
                 </div>
 
                 {/* Min / max order */}
@@ -1035,17 +1209,26 @@ export default function ProductForm({ productId, onSave }: Props) {
                 {/* Quick-select presets */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Quick-Select Presets (comma-separated)
+                    Preset Weights / Quick-Select Presets (comma-separated)
+                    {parseFloat(form.scaleStep) === 0 && (
+                      <span className="text-red-500"> * required — Scale Step is 0</span>
+                    )}
                   </label>
                   <input
                     type="text"
                     value={form.scalePresets}
                     onChange={(e) => setField("scalePresets", e.target.value)}
                     placeholder={`e.g. ${(SCALE_STEPS[form.scaleUnit] || SCALE_STEPS.custom).join(", ")}`}
-                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded"
+                    className={`w-full border px-3 py-2 text-sm focus:outline-none rounded ${
+                      parseFloat(form.scaleStep) === 0 && !form.scalePresets
+                        ? "border-red-300 focus:border-red-500"
+                        : "border-gray-300 focus:border-green-500"
+                    }`}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    These appear as quick-tap buttons in POS and the online store so customers can select a common quantity without typing.
+                    {parseFloat(form.scaleStep) === 0
+                      ? "Scale Step is 0, so these are the ONLY quantities customers/cashiers can select — there is no +/− increment or free typing."
+                      : "These appear as quick-tap buttons in POS and the online store so customers can select a common quantity without typing."}
                   </p>
                   {/* Visual preview */}
                   {form.scalePresets && (
@@ -1059,15 +1242,198 @@ export default function ProductForm({ productId, onSave }: Props) {
                   )}
                 </div>
 
+                {/* ── Structured variations (dynamic, individually-priced presets) ── */}
+                <div className="border-t border-gray-200 pt-4 mt-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Variations <span className="text-gray-400 font-normal">(optional — recommended)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addVariationRow}
+                      className="flex items-center gap-1 text-xs font-semibold text-green-700 hover:text-green-800"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Variation
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Give each sellable preset its own label and price — e.g. "500g Pack"
+                    at ₦1,500 flat, rather than always deriving price from the unit price
+                    above. These show as uniform, labeled buttons for customers on the
+                    product page and for cashiers at POS, and can each have their own
+                    barcode for scanning and their own dedicated stock count if you
+                    pre-pack them ahead of time.
+                  </p>
+
+                  {variations.length === 0 ? (
+                    <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-4 text-xs text-gray-500 text-center">
+                      No variations yet. Without any, this product falls back to the
+                      Price per {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit} and
+                      Preset Weights above (raw quantities, no individual labels/pricing).
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {variations.map((v) => (
+                        <div
+                          key={v._key}
+                          className={`border rounded-xl p-3 space-y-2 ${
+                            v.isActive ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50 opacity-70"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                value={v.label}
+                                onChange={(e) =>
+                                  updateVariationRow(v._key, { label: e.target.value })
+                                }
+                                placeholder='Label — e.g. "500g Pack"'
+                                className="col-span-2 border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
+                              />
+                              <div>
+                                <label className="block text-[10px] text-gray-400 mb-0.5">
+                                  Quantity ({form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit})
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={v.quantity}
+                                  onChange={(e) =>
+                                    updateVariationRow(v._key, { quantity: e.target.value })
+                                  }
+                                  placeholder="0.5"
+                                  className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-gray-400 mb-0.5">
+                                  Price (₦)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={v.price}
+                                  onChange={(e) =>
+                                    updateVariationRow(v._key, { price: e.target.value })
+                                  }
+                                  placeholder="1500"
+                                  className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-gray-400 mb-0.5">
+                                  Compare-at price (₦, optional)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={v.compareAtPrice}
+                                  onChange={(e) =>
+                                    updateVariationRow(v._key, { compareAtPrice: e.target.value })
+                                  }
+                                  placeholder="e.g. 1800"
+                                  className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-gray-400 mb-0.5">
+                                  Barcode (optional — for POS scanning)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={v.barcode}
+                                  onChange={(e) =>
+                                    updateVariationRow(v._key, { barcode: e.target.value })
+                                  }
+                                  placeholder="Scan or type"
+                                  className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeVariationRow(v._key)}
+                              className="text-gray-300 hover:text-red-500 mt-1"
+                              title="Remove variation"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-gray-100">
+                            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={v.dedicatedStock}
+                                onChange={(e) =>
+                                  updateVariationRow(v._key, { dedicatedStock: e.target.checked })
+                                }
+                              />
+                              Dedicated stock
+                            </label>
+                            {v.dedicatedStock && (
+                              <input
+                                type="number"
+                                step="1"
+                                min="0"
+                                value={v.stockQuantity}
+                                onChange={(e) =>
+                                  updateVariationRow(v._key, { stockQuantity: e.target.value })
+                                }
+                                placeholder="Packs in stock"
+                                className="w-28 border border-gray-300 px-2 py-1 text-xs rounded focus:outline-none focus:border-green-500"
+                              />
+                            )}
+                            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="defaultVariation"
+                                checked={v.isDefault}
+                                onChange={() => setDefaultVariationRow(v._key)}
+                              />
+                              Starting preset
+                            </label>
+                            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer ml-auto">
+                              <input
+                                type="checkbox"
+                                checked={v.isActive}
+                                onChange={(e) =>
+                                  updateVariationRow(v._key, { isActive: e.target.checked })
+                                }
+                              />
+                              Active
+                            </label>
+                          </div>
+                          <p className="text-[10px] text-gray-400">
+                            {v.dedicatedStock
+                              ? "This preset tracks its own stock count, separate from the shared pool."
+                              : `Selling this deducts ${v.quantity || "…"} ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit} from the shared stock pool above.`}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Info box */}
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
                   <p className="font-semibold">💡 How this works</p>
                   <ul className="list-disc list-inside space-y-0.5 text-amber-700">
                     <li>
-                      <strong>POS:</strong> Cashier types or taps a preset quantity (e.g. 1.5 kg) and the system multiplies by the price per unit.
+                      <strong>POS:</strong>{" "}
+                      {parseFloat(form.scaleStep) === 0
+                        ? "Cashier must tap one of the Preset Weights — no manual increment or typed-in amount is offered."
+                        : "Cashier types or taps a preset quantity (e.g. 1.5 kg) and the system multiplies by the price per unit."}
                     </li>
                     <li>
-                      <strong>Online store:</strong> Customer uses +/− buttons stepping by {form.scaleStep || "0.1"} {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}, or taps a preset.
+                      <strong>Online store:</strong>{" "}
+                      {parseFloat(form.scaleStep) === 0
+                        ? "Customer must tap one of the Preset Weights — the +/− buttons and manual quantity input are hidden."
+                        : `Customer uses +/− buttons stepping by ${form.scaleStep || "0.1"} ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}, or taps a preset.`}
                     </li>
                     <li>
                       <strong>Stock:</strong> Use the Inventory tab to track total available {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}s in stock.
@@ -1103,9 +1469,14 @@ export default function ProductForm({ productId, onSave }: Props) {
                     ⚠️ Maximum order cannot be negative.
                   </div>
                 )}
-                {form.scaleStep && parseFloat(form.scaleStep) <= 0 && (
+                {form.scaleStep !== "" && parseFloat(form.scaleStep) < 0 && (
                   <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-xs text-red-800">
-                    ⚠️ Scale step must be greater than 0.
+                    ⚠️ Scale step cannot be negative.
+                  </div>
+                )}
+                {parseFloat(form.scaleStep) === 0 && !form.scalePresets && (
+                  <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-xs text-red-800">
+                    ⚠️ Scale Step is 0 (preset-only mode) — you must add at least one Preset Weight above before this product can be saved.
                   </div>
                 )}
               </div>

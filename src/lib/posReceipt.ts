@@ -30,6 +30,7 @@ export interface POSOrderItem {
   discountApplied: number;
   netWeight?: string;
   scaleUnit?: string; // present for scalable products
+  variationLabel?: string | null; // present when this line is a specific preset/variation
 }
 
 export interface POSOrder {
@@ -59,15 +60,22 @@ export function buildReceiptHtml(
 ): string {
   const itemsHtml = order.items
     .map((item) => {
-      const qtyLabel = item.scaleUnit
-        ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
-        : String(item.quantity);
-      const priceLabel = item.scaleUnit
-        ? `&#8358;${item.unitPrice.toLocaleString()}/${item.scaleUnit}`
-        : `&#8358;${item.unitPrice.toLocaleString()}`;
+      const qtyLabel = item.variationLabel
+        ? `${item.quantity}× pack`
+        : item.scaleUnit
+          ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
+          : String(item.quantity);
+      const priceLabel = item.variationLabel
+        ? `&#8358;${item.unitPrice.toLocaleString()}/pack`
+        : item.scaleUnit
+          ? `&#8358;${item.unitPrice.toLocaleString()}/${item.scaleUnit}`
+          : `&#8358;${item.unitPrice.toLocaleString()}`;
+      const nameLine = item.variationLabel
+        ? `${item.productName} — ${item.variationLabel}`
+        : item.productName;
       return `
     <tr>
-      <td style="padding:1mm 0;"><strong>${item.productName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</strong></td>
+      <td style="padding:1mm 0;"><strong>${nameLine}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}</strong></td>
       <td style="text-align:right;white-space:nowrap;"><strong>${qtyLabel}&times;${priceLabel}</strong></td>
       <td style="text-align:right;white-space:nowrap;"><strong>&#8358;${item.subtotal.toLocaleString()}</strong></td>
     </tr>
@@ -173,14 +181,21 @@ function buildReceiptPdfLines(
   lines.push({ type: "hr" });
 
   for (const item of order.items) {
-    const qtyLabel = item.scaleUnit
-      ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
-      : String(item.quantity);
-    const priceLabel = item.scaleUnit
-      ? `${pdfMoney(item.unitPrice)}/${item.scaleUnit}`
-      : pdfMoney(item.unitPrice);
+    const qtyLabel = item.variationLabel
+      ? `${item.quantity}x pack`
+      : item.scaleUnit
+        ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
+        : String(item.quantity);
+    const priceLabel = item.variationLabel
+      ? `${pdfMoney(item.unitPrice)}/pack`
+      : item.scaleUnit
+        ? `${pdfMoney(item.unitPrice)}/${item.scaleUnit}`
+        : pdfMoney(item.unitPrice);
+    const displayName = item.variationLabel
+      ? `${item.productName} — ${item.variationLabel}`
+      : item.productName;
     for (const nameLine of wrapText(
-      `${item.productName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}`,
+      `${displayName}${item.discountApplied > 0 ? ` (-${item.discountApplied}%)` : ""}`,
     )) {
       lines.push({ type: "left", text: nameLine, bold: true });
     }

@@ -180,16 +180,44 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [scaleInput, setScaleInput] = useState(""); // typed input string for scalable
 
+  // Structured variation selection (e.g. "500g Pack") and pack count
+  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
+  const [variationPacks, setVariationPacks] = useState(1);
+
   // Sync scaleQty to product's minOrderQty once product is loaded
   // Must be declared before any early returns to satisfy Rules of Hooks
   useEffect(() => {
     if (!product) return;
     const isScalableProduct = !!product.isScalable;
-    const minQtyProduct = product.minOrderQty || product.scaleStep || 0.1;
-    if (isScalableProduct && minQtyProduct) {
+    if (!isScalableProduct) return;
+    const stepProduct = product.scaleStep ?? 0.1;
+    // Preset-only (scaleStep === 0): start unselected so the customer must
+    // explicitly tap a preset weight — no default quantity, no increment.
+    if (stepProduct === 0) {
+      setScaleQty(0);
+      setScaleInput("");
+      return;
+    }
+    const minQtyProduct = product.minOrderQty || stepProduct;
+    if (minQtyProduct) {
       setScaleQty(minQtyProduct);
       setScaleInput(String(minQtyProduct));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product?.id]);
+
+  // Default-select the "starting preset" (or first active option) whenever
+  // a new product with structured variations loads.
+  useEffect(() => {
+    if (!product) return;
+    const active = (product.variations || []).filter((v) => v.isActive);
+    if (active.length === 0) {
+      setSelectedVariationId(null);
+      return;
+    }
+    const preferred = active.find((v) => v.isDefault) || active[0];
+    setSelectedVariationId(preferred.id);
+    setVariationPacks(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id]);
 
@@ -221,19 +249,43 @@ export default function ProductDetailPage() {
   // ── Scalable product values (safe — product is guaranteed non-null here) ──
   const isScalable = !!product.isScalable;
   const unit = product.scaleUnit || "unit";
-  const step = product.scaleStep || 0.1;
-  const minQty = product.minOrderQty || step;
+  const step = product.scaleStep ?? 0.1;
+  // Preset-only mode: no +/- increment or typed amount — must tap a preset.
+  const presetOnly = isScalable && step === 0;
+  const minQty = product.minOrderQty || (presetOnly ? 0 : step);
   const maxQtyScale =
     product.maxOrderQty ||
     (product.trackInventory ? product.stockQuantity : 9999);
   const presets = product.scalePresets?.length ? product.scalePresets : [];
+  const hasScaleSelection = !presetOnly || scaleQty > 0;
+
+  // ── Structured variations (labeled, individually-priced presets) ──────────
+  const activeVariations = (product.variations || []).filter((v) => v.isActive);
+  const hasVariations = activeVariations.length > 0;
+  const selectedVariation = activeVariations.find((v) => v.id === selectedVariationId);
+  const variationDedicated =
+    !!selectedVariation &&
+    selectedVariation.stockQuantity !== null &&
+    selectedVariation.stockQuantity !== undefined;
+  const variationMaxPacks = selectedVariation
+    ? variationDedicated
+      ? (selectedVariation.stockQuantity as number)
+      : product.trackInventory
+        ? Math.floor((product.stockQuantity ?? Infinity) / selectedVariation.quantity)
+        : Infinity
+    : Infinity;
+  const variationPrice = selectedVariation ? selectedVariation.price * variationPacks : 0;
 
   const roundStep = (val: number) =>
     parseFloat((Math.round(val / step) * step).toFixed(10));
-  const scaleDecrement = () =>
+  const scaleDecrement = () => {
+    if (presetOnly) return;
     setScaleQty((q) => Math.max(minQty, roundStep(q - step)));
-  const scaleIncrement = () =>
+  };
+  const scaleIncrement = () => {
+    if (presetOnly) return;
     setScaleQty((q) => Math.min(maxQtyScale, roundStep(q + step)));
+  };
 
   const effectivePrice =
     isScalable && product.pricePerUnit
@@ -408,7 +460,28 @@ export default function ProductDetailPage() {
 
             {!settings.hidePricing && (
               <div className="flex items-center gap-3 mt-4">
-                {isScalable && product.pricePerUnit ? (
+                {hasVariations && selectedVariation ? (
+                  <>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-3xl font-bold text-brand-700">
+                        {formatPrice(selectedVariation.price)}
+                      </span>
+                      {selectedVariation.compareAtPrice &&
+                        selectedVariation.compareAtPrice > selectedVariation.price && (
+                          <span className="text-lg text-gray-400 line-through">
+                            {formatPrice(selectedVariation.compareAtPrice)}
+                          </span>
+                        )}
+                      <span className="text-sm text-gray-400">
+                        / {selectedVariation.label}
+                      </span>
+                    </div>
+                    <span className="flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">
+                      <Scale className="w-3 h-3" /> {activeVariations.length} option
+                      {activeVariations.length === 1 ? "" : "s"}
+                    </span>
+                  </>
+                ) : isScalable && product.pricePerUnit ? (
                   <>
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-3xl font-bold text-brand-700">
@@ -523,14 +596,144 @@ export default function ProductDetailPage() {
               </div>
             ) : !isOutOfStock ? (
               <div className="mt-6 space-y-3">
-                {/* ── Scalable quantity selector ── */}
-                {isScalable ? (
+                {/* ── Structured variation selector (labeled presets) ── */}
+                {hasVariations ? (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 mb-2">
+                        Choose an option:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {activeVariations.map((v) => {
+                          const dedicated =
+                            v.stockQuantity !== null && v.stockQuantity !== undefined;
+                          const available = dedicated
+                            ? (v.stockQuantity as number)
+                            : product.trackInventory
+                              ? Math.floor(
+                                  (product.stockQuantity ?? Infinity) / v.quantity,
+                                )
+                              : Infinity;
+                          const soldOut = available <= 0;
+                          const selected = v.id === selectedVariationId;
+                          return (
+                            <button
+                              key={v.id}
+                              disabled={soldOut}
+                              onClick={() => {
+                                setSelectedVariationId(v.id);
+                                setVariationPacks(1);
+                              }}
+                              className={`flex flex-col items-start px-3.5 py-2 rounded-xl border-2 text-left transition-colors min-w-[110px] ${
+                                soldOut
+                                  ? "border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed"
+                                  : selected
+                                    ? "border-brand-600 bg-brand-50"
+                                    : "border-gray-200 hover:border-brand-400"
+                              }`}
+                            >
+                              <span className="text-sm font-semibold text-gray-800 flex items-center gap-1">
+                                {v.label}
+                                {v.isDefault && (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1 rounded">
+                                    DEFAULT
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-sm font-bold text-brand-700">
+                                {formatPrice(v.price)}
+                              </span>
+                              <span className="text-[10px] text-gray-400">
+                                {soldOut
+                                  ? "Out of stock"
+                                  : Number.isFinite(available)
+                                    ? `${available} available`
+                                    : "In stock"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {selectedVariation && (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
+                            <button
+                              onClick={() =>
+                                setVariationPacks((n) => Math.max(1, n - 1))
+                              }
+                              disabled={variationPacks <= 1}
+                              className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <span className="w-14 text-center font-semibold text-sm">
+                              {variationPacks}
+                            </span>
+                            <button
+                              onClick={() =>
+                                setVariationPacks((n) =>
+                                  Math.min(variationMaxPacks, n + 1),
+                                )
+                              }
+                              disabled={variationPacks >= variationMaxPacks}
+                              className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <span className="text-sm text-gray-500 font-medium">
+                            {selectedVariation.label}
+                            {variationPacks > 1 ? "s" : ""}
+                          </span>
+                          <div className="text-right flex-1">
+                            <p className="text-2xl font-bold text-brand-700">
+                              {formatPrice(variationPrice)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() =>
+                              addToCart(product.id, variationPacks, {
+                                price: selectedVariation.price,
+                                name: product.name,
+                                image: product.images?.[0] || "",
+                                sku: product.sku,
+                                stockQuantity: variationMaxPacks,
+                                variationId: selectedVariation.id,
+                                variationLabel: selectedVariation.label,
+                              })
+                            }
+                            disabled={cartLoading || variationMaxPacks < 1}
+                            className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <ShoppingCart className="w-5 h-5" />{" "}
+                            Add {variationPacks}× {selectedVariation.label} to Cart
+                          </button>
+                          <button
+                            onClick={() => setFavorited((w) => !w)}
+                            className={`p-3.5 border rounded-xl transition-colors ${favorited ? "border-red-300 text-red-500 bg-red-50" : "border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200"}`}
+                          >
+                            <Heart
+                              className={`w-5 h-5 ${favorited ? "fill-red-500" : ""}`}
+                            />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : /* ── Scalable quantity selector (legacy, no structured variations) ── */
+                isScalable ? (
                   <div className="space-y-3">
                     {/* Presets */}
                     {presets.length > 0 && (
                       <div>
                         <p className="text-xs font-semibold text-gray-500 mb-2">
-                          Quick select:
+                          {presetOnly ? "Select a weight:" : "Quick select:"}
                         </p>
                         <div className="flex flex-wrap gap-2">
                           {presets.map((p) => (
@@ -552,53 +755,75 @@ export default function ProductDetailPage() {
                         </div>
                       </div>
                     )}
+                    {presetOnly && presets.length === 0 && (
+                      <p className="text-xs text-red-500">
+                        This product has no preset weights configured yet — it
+                        can&apos;t be ordered until an admin adds one.
+                      </p>
+                    )}
 
-                    {/* Stepper + direct input */}
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
-                        <button
-                          onClick={scaleDecrement}
-                          disabled={scaleQty <= minQty}
-                          className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        {/* Direct type-in input */}
-                        <input
-                          type="number"
-                          min={minQty}
-                          max={maxQtyScale || undefined}
-                          step={step}
-                          value={scaleInput}
-                          onChange={(e) => {
-                            setScaleInput(e.target.value);
-                            const v = parseFloat(e.target.value);
-                            if (!isNaN(v) && v >= minQty) setScaleQty(v);
-                          }}
-                          onBlur={() => {
-                            // Clamp on blur
-                            const clamped = Math.min(
-                              Math.max(scaleQty, minQty),
-                              maxQtyScale,
-                            );
-                            setScaleQty(clamped);
-                            setScaleInput(String(clamped));
-                          }}
-                          className="w-24 text-center font-semibold text-sm border-x border-gray-200 py-3 focus:outline-none focus:bg-green-50"
-                          placeholder={`${minQty} ${unit}`}
-                        />
-                        <button
-                          onClick={scaleIncrement}
-                          disabled={scaleQty >= maxQtyScale}
-                          className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
+                    {/* Stepper + direct input — hidden in preset-only mode
+                        (scaleStep = 0). The presets above are the only way
+                        to choose a quantity; no +/- increment or typing. */}
+                    {!presetOnly && (
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden">
+                          <button
+                            onClick={scaleDecrement}
+                            disabled={scaleQty <= minQty}
+                            className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          {/* Direct type-in input */}
+                          <input
+                            type="number"
+                            min={minQty}
+                            max={maxQtyScale || undefined}
+                            step={step}
+                            value={scaleInput}
+                            onChange={(e) => {
+                              setScaleInput(e.target.value);
+                              const v = parseFloat(e.target.value);
+                              if (!isNaN(v) && v >= minQty) setScaleQty(v);
+                            }}
+                            onBlur={() => {
+                              // Clamp on blur
+                              const clamped = Math.min(
+                                Math.max(scaleQty, minQty),
+                                maxQtyScale,
+                              );
+                              setScaleQty(clamped);
+                              setScaleInput(String(clamped));
+                            }}
+                            className="w-24 text-center font-semibold text-sm border-x border-gray-200 py-3 focus:outline-none focus:bg-green-50"
+                            placeholder={`${minQty} ${unit}`}
+                          />
+                          <button
+                            onClick={scaleIncrement}
+                            disabled={scaleQty >= maxQtyScale}
+                            className="px-3 py-3 text-gray-500 hover:text-gray-900 disabled:opacity-40 transition-colors"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <span className="text-sm text-gray-500 font-medium">
+                          {unit}
+                        </span>
+                        <div className="text-right flex-1">
+                          <p className="text-2xl font-bold text-brand-700">
+                            {formatPrice(effectivePrice)}
+                          </p>
+                          {product.pricePerUnit && (
+                            <p className="text-xs text-gray-400">
+                              {formatPrice(product.pricePerUnit)}/{unit}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-sm text-gray-500 font-medium">
-                        {unit}
-                      </span>
-                      <div className="text-right flex-1">
+                    )}
+                    {presetOnly && (
+                      <div className="text-right">
                         <p className="text-2xl font-bold text-brand-700">
                           {formatPrice(effectivePrice)}
                         </p>
@@ -608,14 +833,13 @@ export default function ProductDetailPage() {
                           </p>
                         )}
                       </div>
-                    </div>
+                    )}
 
                     {/* Step hint */}
                     <p className="text-xs text-gray-400">
-                      Min: {scaleDisplay(minQty)} · Step: {step} {unit}
-                      {maxQtyScale < 9999
-                        ? ` · Max: ${scaleDisplay(maxQtyScale)}`
-                        : ""}
+                      {presetOnly
+                        ? "This product is sold in fixed preset weights only."
+                        : `Min: ${scaleDisplay(minQty)} · Step: ${step} ${unit}${maxQtyScale < 9999 ? ` · Max: ${scaleDisplay(maxQtyScale)}` : ""}`}
                     </p>
 
                     {/* Add to cart */}
@@ -635,11 +859,16 @@ export default function ProductDetailPage() {
                             maxOrderQty: product.maxOrderQty,
                           })
                         }
-                        disabled={cartLoading || scaleQty < minQty}
+                        disabled={
+                          cartLoading ||
+                          (presetOnly ? !hasScaleSelection : scaleQty < minQty)
+                        }
                         className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
                       >
-                        <ShoppingCart className="w-5 h-5" /> Add{" "}
-                        {scaleDisplay(scaleQty)} to Cart
+                        <ShoppingCart className="w-5 h-5" />{" "}
+                        {presetOnly && !hasScaleSelection
+                          ? "Select a weight"
+                          : `Add ${scaleDisplay(scaleQty)} to Cart`}
                       </button>
                       <button
                         onClick={() => setFavorited((w) => !w)}

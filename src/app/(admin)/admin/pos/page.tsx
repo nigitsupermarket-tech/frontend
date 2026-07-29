@@ -40,6 +40,18 @@ import { formatPrice } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface ProductVariation {
+  id: string;
+  label: string;
+  quantity: number;
+  price: number;
+  compareAtPrice?: number | null;
+  barcode?: string | null;
+  stockQuantity?: number | null; // null = shared stock, number = dedicated
+  isDefault: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
 interface Product {
   id: string;
   name: string;
@@ -61,12 +73,15 @@ interface Product {
   maxOrderQty?: number;
   scaleStep?: number;
   scalePresets?: number[];
+  variations?: ProductVariation[];
 }
 interface CartItem {
   product: Product;
-  quantity: number; // for scalable: this is the float amount (e.g. 1.5 for 1.5kg)
-  unitPrice: number; // for scalable: pricePerUnit; for fixed: product.price
+  quantity: number; // for scalable: float amount (e.g. 1.5kg); for a variation: PACK COUNT
+  unitPrice: number; // for scalable: pricePerUnit; for fixed: product.price; for a variation: variation.price
   discount: number;
+  variationId?: string; // set when this line is a specific product variation/preset
+  variationLabel?: string;
 }
 interface Discount {
   id: string;
@@ -118,6 +133,8 @@ interface SuspendedOrder {
     barcode?: string | null;
     netWeight?: string | null;
     scaleUnit?: string | null;
+    variationId?: string | null;
+    variationLabel?: string | null;
   }[];
 }
 interface POSSession {
@@ -346,10 +363,32 @@ function CartItemRow({
 }) {
   const [showDiscount, setShowDiscount] = useState(false);
 
+  // ── Variation (structured preset) line ──────────────────────────────────
+  // `variation` may be undefined even when item.variationId is set — e.g.
+  // right after resuming a suspended order, the cart is rebuilt from a
+  // snapshot that doesn't include the full product.variations array. The
+  // line should still render/behave as a variation line using the snapshot
+  // (item.variationLabel, item.unitPrice, item.quantity as pack count).
+  const variation = item.variationId
+    ? item.product.variations?.find((v) => v.id === item.variationId)
+    : undefined;
+  const isVariationLine = !!item.variationId;
+
+  const variationMax = variation
+    ? variation.stockQuantity !== null && variation.stockQuantity !== undefined
+      ? variation.stockQuantity
+      : item.product.trackInventory
+        ? Math.floor((item.product.stockQuantity ?? Infinity) / variation.quantity)
+        : Infinity
+    : Infinity;
+
   const isScalable = !!item.product.isScalable;
   const unit = item.product.scaleUnit || "unit";
-  const step = item.product.scaleStep || 0.1;
-  const minQty = item.product.minOrderQty || step;
+  const step = item.product.scaleStep ?? 0.1;
+  // Preset-only: scaleStep = 0 — no +/- increment on the cashier screen,
+  // quantity can only change by tapping one of the preset weight chips.
+  const presetOnly = !isVariationLine && isScalable && step === 0;
+  const minQty = item.product.minOrderQty || (presetOnly ? 0 : step);
   const maxStock = item.product.trackInventory
     ? (item.product.stockQuantity ?? Infinity)
     : Infinity;
@@ -361,6 +400,15 @@ function CartItemRow({
     parseFloat((Math.round(v / step) * step).toFixed(10));
 
   const handleDecrement = () => {
+    if (isVariationLine) {
+      if (item.quantity <= 1) {
+        onRemove();
+        return;
+      }
+      onQtyChange(item.quantity - 1);
+      return;
+    }
+    if (presetOnly) return;
     if (isScalable) {
       const next = roundStep(item.quantity - step);
       if (next < minQty) {
@@ -374,6 +422,12 @@ function CartItemRow({
   };
 
   const handleIncrement = () => {
+    if (isVariationLine) {
+      if (item.quantity + 1 > variationMax) return;
+      onQtyChange(item.quantity + 1);
+      return;
+    }
+    if (presetOnly) return;
     if (isScalable) {
       const next = roundStep(item.quantity + step);
       if (next > maxQty) return;
@@ -383,17 +437,29 @@ function CartItemRow({
     }
   };
 
-  const atMin = isScalable ? item.quantity <= minQty : item.quantity <= 1;
-  const atMax = isScalable
-    ? item.quantity >= maxQty
-    : item.product.trackInventory &&
-      item.quantity >= (item.product.stockQuantity ?? Infinity);
+  const atMin = isVariationLine
+    ? item.quantity <= 1
+    : presetOnly
+      ? true
+      : isScalable
+        ? item.quantity <= minQty
+        : item.quantity <= 1;
+  const atMax = isVariationLine
+    ? item.quantity >= variationMax
+    : presetOnly
+      ? true
+      : isScalable
+        ? item.quantity >= maxQty
+        : item.product.trackInventory &&
+          item.quantity >= (item.product.stockQuantity ?? Infinity);
 
-  const qtyDisplay = isScalable
-    ? item.quantity % 1 === 0
-      ? `${item.quantity.toFixed(0)} ${unit}`
-      : `${item.quantity.toFixed(1)} ${unit}`
-    : String(item.quantity);
+  const qtyDisplay = isVariationLine
+    ? `×${item.quantity}`
+    : isScalable
+      ? item.quantity % 1 === 0
+        ? `${item.quantity.toFixed(0)} ${unit}`
+        : `${item.quantity.toFixed(1)} ${unit}`
+      : String(item.quantity);
 
   const lineTotal = item.unitPrice * item.quantity * (1 - item.discount / 100);
 
@@ -404,15 +470,23 @@ function CartItemRow({
           <p className="text-xs font-semibold text-gray-900 line-clamp-1">
             {item.product.name}
           </p>
-          <p className="text-[10px] text-gray-400">
-            {item.product.sku}
-            {item.product.netWeight && ` · ${item.product.netWeight}`}
-          </p>
+          {isVariationLine ? (
+            <p className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 inline-block px-1 rounded mt-0.5">
+              {item.variationLabel || variation?.label}
+            </p>
+          ) : (
+            <p className="text-[10px] text-gray-400">
+              {item.product.sku}
+              {item.product.netWeight && ` · ${item.product.netWeight}`}
+            </p>
+          )}
           <div className="flex items-center gap-1 mt-0.5">
             <span className="text-xs text-gray-600">
-              {isScalable
-                ? `${formatPrice(item.unitPrice)}/${unit}`
-                : formatPrice(item.unitPrice)}
+              {isVariationLine
+                ? `${formatPrice(item.unitPrice)}/pack`
+                : isScalable
+                  ? `${formatPrice(item.unitPrice)}/${unit}`
+                  : formatPrice(item.unitPrice)}
             </span>
             {item.discount > 0 && (
               <span className="text-[10px] text-green-700 bg-green-100 px-1 rounded">
@@ -424,51 +498,63 @@ function CartItemRow({
 
         {/* Quantity / amount control */}
         <div className="flex flex-col items-center gap-1">
-          {/* Scalable presets row */}
-          {isScalable && (item.product.scalePresets?.length ?? 0) > 0 && (
-            <div className="flex gap-1 flex-wrap justify-end max-w-[120px]">
-              {(item.product.scalePresets || []).slice(0, 4).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => onQtyChange(p)}
-                  className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
-                    item.quantity === p
-                      ? "bg-green-600 text-white border-green-600"
-                      : "border-gray-300 text-gray-600 hover:border-green-500"
-                  }`}
-                >
-                  {p}
-                  {unit}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Scalable presets row (legacy raw-number presets only) */}
+          {!isVariationLine &&
+            isScalable &&
+            (item.product.scalePresets?.length ?? 0) > 0 && (
+              <div className="flex gap-1 flex-wrap justify-end max-w-[120px]">
+                {(item.product.scalePresets || []).slice(0, 4).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => onQtyChange(p)}
+                    className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                      item.quantity === p
+                        ? "bg-green-600 text-white border-green-600"
+                        : "border-gray-300 text-gray-600 hover:border-green-500"
+                    }`}
+                  >
+                    {p}
+                    {unit}
+                  </button>
+                ))}
+              </div>
+            )}
 
-          <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-            <button
-              onClick={handleDecrement}
-              className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200"
-            >
-              <Minus className="w-2.5 h-2.5" />
-            </button>
-            <span
-              className={`text-center text-xs font-bold ${isScalable ? "w-14 px-1" : "w-7"}`}
-            >
+          {presetOnly ? (
+            // No +/- increment in preset-only mode — quantity can only be
+            // changed by tapping a different preset chip above, or removed.
+            <span className="text-center text-xs font-bold w-14 px-1 py-1 border border-gray-200 rounded bg-gray-50">
               {qtyDisplay}
             </span>
-            <button
-              onClick={handleIncrement}
-              disabled={atMax}
-              className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-              title={
-                atMax
-                  ? `Max ${isScalable ? `${maxQty} ${unit}` : `stock (${item.product.stockQuantity})`} reached`
-                  : undefined
-              }
-            >
-              <Plus className="w-2.5 h-2.5" />
-            </button>
-          </div>
+          ) : (
+            <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+              <button
+                onClick={handleDecrement}
+                className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200"
+              >
+                <Minus className="w-2.5 h-2.5" />
+              </button>
+              <span
+                className={`text-center text-xs font-bold ${isScalable || isVariationLine ? "w-14 px-1" : "w-7"}`}
+              >
+                {qtyDisplay}
+              </span>
+              <button
+                onClick={handleIncrement}
+                disabled={!!atMax}
+                className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                title={
+                  atMax
+                    ? isVariationLine
+                      ? `Max ${variationMax} pack(s) reached`
+                      : `Max ${isScalable ? `${maxQty} ${unit}` : `stock (${item.product.stockQuantity})`} reached`
+                    : undefined
+                }
+              >
+                <Plus className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="text-right w-16 flex-shrink-0">
@@ -521,7 +607,11 @@ interface POSProductGridProps {
   selectedCategory: string;
   onCategoryChange: (id: string) => void;
   loading: boolean;
-  onAddToCart: (product: Product) => void;
+  onAddToCart: (
+    product: Product,
+    presetQty?: number,
+    variation?: ProductVariation,
+  ) => void;
   cart: CartItem[];
 }
 
@@ -534,6 +624,11 @@ function POSProductGrid({
   onAddToCart,
   cart,
 }: POSProductGridProps) {
+  // Preset-only products (scaleStep = 0) can't be added with a default
+  // quantity — tapping the tile opens this inline picker so the cashier
+  // must explicitly choose one of the preset weights.
+  const [pickerProduct, setPickerProduct] = useState<Product | null>(null);
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Category filter pills */}
@@ -582,17 +677,33 @@ function POSProductGrid({
         ) : (
           <div className="grid grid-cols-3 gap-2">
             {products.map((product) => {
-              const inCart = cart.find((i) => i.product.id === product.id);
+              const inCart = cart.filter((i) => i.product.id === product.id);
+              const inCartQty = inCart.reduce((s, i) => s + i.quantity, 0);
               const outOfStock = product.stockQuantity <= 0;
+              const activeVariations = (product.variations || []).filter(
+                (v) => v.isActive,
+              );
+              const hasVariations = activeVariations.length > 0;
+              const presetOnly =
+                !hasVariations &&
+                !!product.isScalable &&
+                (product.scaleStep ?? 0.1) === 0;
               return (
                 <button
                   key={product.id}
-                  onClick={() => !outOfStock && onAddToCart(product)}
+                  onClick={() => {
+                    if (outOfStock) return;
+                    if (hasVariations || presetOnly) {
+                      setPickerProduct(product);
+                    } else {
+                      onAddToCart(product);
+                    }
+                  }}
                   disabled={outOfStock}
                   className={`relative flex flex-col rounded-xl border-2 overflow-hidden transition-all active:scale-95 text-left ${
                     outOfStock
                       ? "border-gray-100 opacity-50 cursor-not-allowed bg-gray-50"
-                      : inCart
+                      : inCart.length > 0
                         ? "border-green-500 bg-green-50 shadow-md"
                         : "border-gray-200 bg-white hover:border-green-400 hover:shadow-sm"
                   }`}
@@ -614,11 +725,13 @@ function POSProductGrid({
                   </div>
 
                   {/* Cart quantity badge */}
-                  {inCart && (
+                  {inCart.length > 0 && (
                     <span className="absolute top-1.5 right-1.5 bg-green-600 text-white text-[10px] font-bold min-w-5 h-5 px-1 rounded-full flex items-center justify-center shadow leading-none">
-                      {product.isScalable
-                        ? `${inCart.quantity % 1 === 0 ? inCart.quantity.toFixed(0) : inCart.quantity.toFixed(1)}${product.scaleUnit ? product.scaleUnit[0] : ""}`
-                        : inCart.quantity}
+                      {hasVariations
+                        ? `×${inCartQty}`
+                        : product.isScalable
+                          ? `${inCartQty % 1 === 0 ? inCartQty.toFixed(0) : inCartQty.toFixed(1)}${product.scaleUnit ? product.scaleUnit[0] : ""}`
+                          : inCartQty}
                     </span>
                   )}
 
@@ -629,8 +742,14 @@ function POSProductGrid({
                     </span>
                   )}
 
-                  {/* Scalable badge */}
-                  {!outOfStock && product.isScalable && (
+                  {/* Variation / scalable badge */}
+                  {!outOfStock && hasVariations && (
+                    <span className="absolute top-1.5 left-1.5 bg-emerald-700 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
+                      {activeVariations.length} option
+                      {activeVariations.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {!outOfStock && !hasVariations && product.isScalable && (
                     <span className="absolute top-1.5 left-1.5 bg-green-700 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
                       ⚖ {product.scaleUnit || "unit"}
                     </span>
@@ -642,14 +761,20 @@ function POSProductGrid({
                       {product.name}
                     </p>
                     <p className="text-[11px] font-bold text-green-700 mt-0.5">
-                      {product.isScalable && product.pricePerUnit
-                        ? `${formatPrice(product.pricePerUnit)}/${product.scaleUnit || "unit"}`
-                        : formatPrice(product.price)}
+                      {hasVariations
+                        ? `From ${formatPrice(
+                            Math.min(...activeVariations.map((v) => v.price)),
+                          )}`
+                        : product.isScalable && product.pricePerUnit
+                          ? `${formatPrice(product.pricePerUnit)}/${product.scaleUnit || "unit"}`
+                          : formatPrice(product.price)}
                     </p>
                     <p className="text-[9px] text-gray-400">
-                      {product.isScalable
-                        ? `${product.stockQuantity} ${product.scaleUnit || "unit"} left`
-                        : `Qty: ${product.stockQuantity}`}
+                      {hasVariations
+                        ? "Tap to choose an option"
+                        : product.isScalable
+                          ? `${product.stockQuantity} ${product.scaleUnit || "unit"} left`
+                          : `Qty: ${product.stockQuantity}`}
                     </p>
                   </div>
                 </button>
@@ -658,6 +783,111 @@ function POSProductGrid({
           </div>
         )}
       </div>
+
+      {/* Option picker — shown when a product has structured variations
+          (labeled presets like "500g Pack") or is a legacy preset-only
+          (scaleStep = 0) scalable product. No default quantity is added;
+          the cashier must explicitly choose an option. */}
+      {pickerProduct && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4"
+          onClick={() => setPickerProduct(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-bold text-gray-900 line-clamp-2">
+              {pickerProduct.name}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">
+              Select an option to add it to the sale.
+            </p>
+            {(pickerProduct.variations || []).filter((v) => v.isActive)
+              .length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {(pickerProduct.variations || [])
+                  .filter((v) => v.isActive)
+                  .map((v) => {
+                    const dedicated =
+                      v.stockQuantity !== null && v.stockQuantity !== undefined;
+                    const available = dedicated
+                      ? (v.stockQuantity as number)
+                      : pickerProduct.trackInventory
+                        ? Math.floor(
+                            (pickerProduct.stockQuantity ?? Infinity) /
+                              v.quantity,
+                          )
+                        : Infinity;
+                    const soldOut = available <= 0;
+                    return (
+                      <button
+                        key={v.id}
+                        disabled={soldOut}
+                        onClick={() => {
+                          onAddToCart(pickerProduct, undefined, v);
+                          setPickerProduct(null);
+                        }}
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                          soldOut
+                            ? "border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed"
+                            : "border-gray-200 hover:border-green-500 hover:bg-green-50"
+                        }`}
+                      >
+                        <span>
+                          <span className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                            {v.label}
+                            {v.isDefault && (
+                              <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1 rounded">
+                                DEFAULT
+                              </span>
+                            )}
+                          </span>
+                          <span className="block text-[11px] text-gray-400 mt-0.5">
+                            {soldOut
+                              ? "Out of stock"
+                              : Number.isFinite(available)
+                                ? `${available} available`
+                                : "In stock"}
+                          </span>
+                        </span>
+                        <span className="text-sm font-bold text-green-700">
+                          {formatPrice(v.price)}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            ) : (pickerProduct.scalePresets || []).length === 0 ? (
+              <p className="text-xs text-red-500">
+                No preset weights are configured for this product. Contact an
+                admin to add some in Product Settings.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(pickerProduct.scalePresets || []).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      onAddToCart(pickerProduct, p);
+                      setPickerProduct(null);
+                    }}
+                    className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                  >
+                    {p} {pickerProduct.scaleUnit || "unit"}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => setPickerProduct(null)}
+              className="mt-4 w-full py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -847,7 +1077,15 @@ export default function POSPage() {
       );
       const products = res.data.products || [];
       if (products.length > 0) {
-        addToCart(products[0]);
+        const product = products[0];
+        // The scan can match either the product's own barcode or a
+        // specific variation's dedicated barcode (e.g. a pre-labeled
+        // "500g Pack" sticker) — route straight to that preset.
+        const matchedVariation =
+          product.barcode === code
+            ? undefined
+            : (product.variations || []).find((v: ProductVariation) => v.barcode === code);
+        addToCart(product, undefined, matchedVariation);
         if (barcodeRef.current) barcodeRef.current.value = "";
       } else toast(`No product for barcode: ${code}`, "error");
     } catch {
@@ -910,19 +1148,72 @@ export default function POSPage() {
     }
   };
 
-  const addToCart = (product: Product) => {
+  const addToCart = (
+    product: Product,
+    presetQty?: number,
+    variation?: ProductVariation,
+  ) => {
+    // ── Structured preset/variation (e.g. "500g Pack") ────────────────────
+    if (variation) {
+      const dedicated =
+        variation.stockQuantity !== null && variation.stockQuantity !== undefined;
+      const maxPacks = dedicated
+        ? (variation.stockQuantity as number)
+        : product.trackInventory
+          ? Math.floor((product.stockQuantity ?? Infinity) / variation.quantity)
+          : Infinity;
+
+      setCart((prev) => {
+        const existing = prev.find(
+          (i) => i.product.id === product.id && i.variationId === variation.id,
+        );
+        if (existing) {
+          if (existing.quantity + 1 > maxPacks) return prev;
+          return prev.map((i) =>
+            i === existing ? { ...i, quantity: i.quantity + 1 } : i,
+          );
+        }
+        if (maxPacks < 1) return prev;
+        return [
+          ...prev,
+          {
+            product,
+            quantity: 1,
+            unitPrice: variation.price,
+            discount: 0,
+            variationId: variation.id,
+            variationLabel: variation.label,
+          },
+        ];
+      });
+      setShowSearch(false);
+      setSearchQuery("");
+      setSearchResults([]);
+      return;
+    }
+
     const isScalable = !!product.isScalable;
+    const step = product.scaleStep ?? 0.1;
+    // Preset-only: scaleStep = 0 — there's no default increment quantity,
+    // the cashier must have tapped an explicit preset weight (the grid
+    // routes these through the preset picker before ever calling this
+    // with presetQty set).
+    const presetOnly = isScalable && step === 0;
+    if (presetOnly && presetQty === undefined) {
+      toast(`Select a preset weight for ${product.name}`, "error");
+      return;
+    }
+
     const unitPrice =
       isScalable && product.pricePerUnit ? product.pricePerUnit : product.price;
-    const startQty = isScalable
-      ? product.minOrderQty || product.scaleStep || 0.1
-      : 1;
+    const startQty = presetQty ?? (isScalable ? product.minOrderQty || step : 1);
 
     setCart((prev) => {
-      const existing = prev.find((i) => i.product.id === product.id);
+      const existing = prev.find(
+        (i) => i.product.id === product.id && !i.variationId,
+      );
       if (existing) {
         if (isScalable) {
-          const step = product.scaleStep || 0.1;
           const maxQty = product.maxOrderQty
             ? Math.min(
                 product.maxOrderQty,
@@ -931,12 +1222,14 @@ export default function POSPage() {
             : product.trackInventory
               ? product.stockQuantity
               : Infinity;
-          const next = parseFloat(
-            (Math.round((existing.quantity + step) / step) * step).toFixed(10),
-          );
+          const next = presetOnly
+            ? parseFloat((existing.quantity + (presetQty as number)).toFixed(10))
+            : parseFloat(
+                (Math.round((existing.quantity + step) / step) * step).toFixed(10),
+              );
           if (next > maxQty) return prev;
           return prev.map((i) =>
-            i.product.id === product.id ? { ...i, quantity: next } : i,
+            i === existing ? { ...i, quantity: next } : i,
           );
         } else {
           const maxQty = product.trackInventory
@@ -944,9 +1237,7 @@ export default function POSPage() {
             : Infinity;
           if (existing.quantity >= maxQty) return prev;
           return prev.map((i) =>
-            i.product.id === product.id
-              ? { ...i, quantity: i.quantity + 1 }
-              : i,
+            i === existing ? { ...i, quantity: i.quantity + 1 } : i,
           );
         }
       }
@@ -970,20 +1261,32 @@ export default function POSPage() {
     setSearchResults([]);
   };
 
-  const updateQty = (productId: string, qty: number) => {
+  const updateQty = (productId: string, qty: number, variationId?: string) => {
     if (qty <= 0) {
-      setCart((p) => p.filter((i) => i.product.id !== productId));
+      setCart((p) =>
+        p.filter(
+          (i) => !(i.product.id === productId && (i.variationId ?? undefined) === variationId),
+        ),
+      );
       return;
     }
     setCart((p) =>
-      p.map((i) => (i.product.id === productId ? { ...i, quantity: qty } : i)),
+      p.map((i) =>
+        i.product.id === productId && (i.variationId ?? undefined) === variationId
+          ? { ...i, quantity: qty }
+          : i,
+      ),
     );
   };
 
-  const updateItemDiscount = (productId: string, pct: number) => {
+  const updateItemDiscount = (
+    productId: string,
+    pct: number,
+    variationId?: string,
+  ) => {
     setCart((p) =>
       p.map((i) =>
-        i.product.id === productId
+        i.product.id === productId && (i.variationId ?? undefined) === variationId
           ? { ...i, discount: Math.min(100, Math.max(0, pct)) }
           : i,
       ),
@@ -1025,6 +1328,8 @@ export default function POSPage() {
           scaleUnit: item.product.isScalable
             ? (item.product.scaleUnit ?? null)
             : null,
+          variationId: item.variationId,
+          variationLabel: item.variationLabel,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           subtotal: item.unitPrice * item.quantity * (1 - item.discount / 100),
@@ -1089,6 +1394,8 @@ export default function POSPage() {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         discount: item.discountApplied,
+        variationId: item.variationId ?? undefined,
+        variationLabel: item.variationLabel ?? undefined,
       }));
 
       setCart(rebuiltCart);
@@ -1240,6 +1547,8 @@ export default function POSPage() {
           scaleUnit: item.product.isScalable
             ? (item.product.scaleUnit ?? null)
             : null,
+          variationId: item.variationId,
+          variationLabel: item.variationLabel,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           subtotal: item.unitPrice * item.quantity * (1 - item.discount / 100),
@@ -1617,15 +1926,23 @@ export default function POSPage() {
               <div className="divide-y divide-gray-100">
                 {cart.map((item) => (
                   <CartItemRow
-                    key={item.product.id}
+                    key={`${item.product.id}-${item.variationId || "base"}`}
                     item={item}
-                    onQtyChange={(qty) => updateQty(item.product.id, qty)}
+                    onQtyChange={(qty) =>
+                      updateQty(item.product.id, qty, item.variationId)
+                    }
                     onDiscountChange={(d) =>
-                      updateItemDiscount(item.product.id, d)
+                      updateItemDiscount(item.product.id, d, item.variationId)
                     }
                     onRemove={() =>
                       setCart((p) =>
-                        p.filter((i) => i.product.id !== item.product.id),
+                        p.filter(
+                          (i) =>
+                            !(
+                              i.product.id === item.product.id &&
+                              i.variationId === item.variationId
+                            ),
+                        ),
                       )
                     }
                   />

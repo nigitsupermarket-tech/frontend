@@ -7,7 +7,7 @@ import { getApiError } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 
 interface ProductMeta {
-  price: number; // pricePerUnit for scalable, product.price for fixed
+  price: number; // pricePerUnit for scalable, product.price for fixed, variation.price for a variation
   name: string;
   image?: string;
   sku?: string;
@@ -18,6 +18,9 @@ interface ProductMeta {
   scaleStep?: number;
   minOrderQty?: number;
   maxOrderQty?: number;
+  // structured variation — set when adding a specific preset (e.g. "500g Pack")
+  variationId?: string;
+  variationLabel?: string;
 }
 
 function friendlyCartError(error: unknown): string {
@@ -75,6 +78,10 @@ export function useCart() {
               scaleStep: meta.scaleStep,
               minOrderQty: meta.minOrderQty,
               maxOrderQty: meta.maxOrderQty,
+              // Structured variation — needed both for guest-cart display and
+              // to reach the backend on the authenticated add-to-cart call.
+              variationId: meta.variationId,
+              variationLabel: meta.variationLabel,
             }
           : undefined,
       );
@@ -125,11 +132,15 @@ export function useCart() {
   const displayItems = isAuthenticated
     ? store.items
     : store.guestItems.map((g) => ({
-        id: g.productId,
+        // Composite id so multiple variations of the same product don't
+        // collide when updating/removing a single line (see cartStore.ts).
+        id: g.variationId ? `${g.productId}::${g.variationId}` : g.productId,
         cartId: "",
         productId: g.productId,
         quantity: g.quantity,
         price: g.price,
+        variationId: g.variationId,
+        variationLabel: g.variationLabel,
         // Expose scalable fields directly on item (for guest path)
         isScalable: g.isScalable,
         scaleUnit: g.scaleUnit,

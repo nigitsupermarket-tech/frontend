@@ -99,6 +99,13 @@ function getScaleStep(item: any): number {
   return item.product?.scaleStep ?? item.scaleStep ?? 0.1;
 }
 
+// Preset-only: scaleStep = 0 — no +/- increment is offered anywhere for
+// this item; quantity can only be changed by removing and re-adding with
+// a different preset weight.
+function isPresetOnly(item: any): boolean {
+  return getIsScalable(item) && getScaleStep(item) === 0;
+}
+
 function getMinQty(item: any): number {
   return item.product?.minOrderQty ?? item.minOrderQty ?? getScaleStep(item);
 }
@@ -115,6 +122,28 @@ function formatQty(qty: number, unit?: string): string {
   const rounded =
     qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
   return unit ? `${rounded} ${unit}` : rounded;
+}
+
+// Set when this line is a specific structured variation/preset (e.g. "500g
+// Pack") rather than a free-form custom-weight or fixed-price entry.
+function getVariationLabel(item: any): string | undefined {
+  return item.variationLabel ?? undefined;
+}
+// Max number of packs of this variation that can be added — see the same
+// helper in app/(guest)/cart/page.tsx for the full explanation.
+function getVariationMaxPacks(item: any): number {
+  if (!item.variationId) return Infinity;
+  const variation = item.product?.variations?.find(
+    (v: any) => v.id === item.variationId,
+  );
+  if (variation) {
+    return variation.stockQuantity !== null && variation.stockQuantity !== undefined
+      ? variation.stockQuantity
+      : item.product?.trackInventory !== false && item.product?.stockQuantity != null
+        ? Math.floor(item.product.stockQuantity / variation.quantity)
+        : Infinity;
+  }
+  return item.product?.stockQuantity ?? Infinity;
 }
 
 // ─── Cart Drawer ──────────────────────────────────────────────────────────────
@@ -215,9 +244,21 @@ export function CartDrawer() {
                 const step = getScaleStep(item);
                 const minQty = getMinQty(item);
                 const maxQty = getMaxQty(item);
-                const itemId = isGuest ? item.productId : item.id;
+                const presetOnly = isPresetOnly(item);
+                // item.id is the real CartItem id for authenticated users, or
+                // a composite "productId::variationId" (or plain productId)
+                // for guests — see useCart.ts's displayItems.
+                const itemId = item.id ?? item.productId;
+                const isVariationLine = !!item.variationId;
+                const variationMaxPacks = getVariationMaxPacks(item);
 
                 const handleDecrement = () => {
+                  if (isVariationLine) {
+                    if (item.quantity <= 1) removeFromCart(itemId);
+                    else updateQuantity(itemId, item.quantity - 1);
+                    return;
+                  }
+                  if (presetOnly) return;
                   if (isScalable) {
                     const next = parseFloat(
                       (
@@ -235,6 +276,12 @@ export function CartDrawer() {
                 };
 
                 const handleIncrement = () => {
+                  if (isVariationLine) {
+                    if (item.quantity + 1 > variationMaxPacks) return;
+                    updateQuantity(itemId, item.quantity + 1);
+                    return;
+                  }
+                  if (presetOnly) return;
                   if (isScalable) {
                     const next = parseFloat(
                       (
@@ -248,10 +295,18 @@ export function CartDrawer() {
                   }
                 };
 
-                const atMin = isScalable
-                  ? item.quantity <= minQty
-                  : item.quantity <= 1;
-                const atMax = item.quantity >= maxQty;
+                const atMin = isVariationLine
+                  ? item.quantity <= 1
+                  : presetOnly
+                    ? true
+                    : isScalable
+                      ? item.quantity <= minQty
+                      : item.quantity <= 1;
+                const atMax = isVariationLine
+                  ? item.quantity >= variationMaxPacks
+                  : presetOnly
+                    ? true
+                    : item.quantity >= maxQty;
                 const lineTotal = item.price * item.quantity;
 
                 return (
@@ -274,9 +329,18 @@ export function CartDrawer() {
                           {item.product?.sku ?? item.sku}
                         </p>
                       )}
+                      {getVariationLabel(item) && (
+                        <p className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 inline-block px-1.5 py-0.5 rounded mt-1">
+                          {getVariationLabel(item)}
+                        </p>
+                      )}
 
                       {/* Scalable badge + unit price */}
-                      {isScalable && unit ? (
+                      {getVariationLabel(item) ? (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {formatPrice(item.price)}/pack
+                        </p>
+                      ) : isScalable && unit ? (
                         <p className="text-xs text-green-700 font-semibold mt-0.5 flex items-center gap-1">
                           <Scale className="w-3 h-3" />
                           {formatPrice(item.price)}/{unit}
@@ -290,33 +354,47 @@ export function CartDrawer() {
                       <div className="flex items-center justify-between mt-2.5">
                         {/* Quantity / amount stepper */}
                         <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
-                            <button
-                              onClick={handleDecrement}
-                              disabled={atMin || isLoading}
-                              className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span
-                              className={`text-center text-sm font-semibold text-gray-900 select-none ${isScalable ? "w-20 px-1" : "w-8"}`}
-                            >
+                          {presetOnly ? (
+                            <span className="text-center text-sm font-semibold text-gray-900 select-none border border-gray-200 rounded-xl px-3 py-1.5 bg-gray-50">
                               {formatQty(item.quantity, unit)}
                             </span>
-                            <button
-                              onClick={handleIncrement}
-                              disabled={atMax || isLoading}
-                              className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                          {atMax && (
-                            <p className="text-[10px] text-orange-500 font-medium leading-tight text-center">
-                              {isScalable
-                                ? `Max: ${formatQty(maxQty, unit)}`
-                                : `Max stock (${maxQty}) reached`}
+                          ) : (
+                            <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
+                              <button
+                                onClick={handleDecrement}
+                                disabled={atMin || isLoading}
+                                className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span
+                                className={`text-center text-sm font-semibold text-gray-900 select-none ${isScalable ? "w-20 px-1" : "w-8"}`}
+                              >
+                                {isVariationLine
+                                  ? `×${item.quantity}`
+                                  : formatQty(item.quantity, unit)}
+                              </span>
+                              <button
+                                onClick={handleIncrement}
+                                disabled={atMax || isLoading}
+                                className="px-2.5 py-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                          {presetOnly ? (
+                            <p className="text-[10px] text-gray-400 font-medium leading-tight text-center">
+                              Fixed preset weight
                             </p>
+                          ) : (
+                            atMax && (
+                              <p className="text-[10px] text-orange-500 font-medium leading-tight text-center">
+                                {isScalable
+                                  ? `Max: ${formatQty(maxQty, unit)}`
+                                  : `Max stock (${maxQty}) reached`}
+                              </p>
+                            )
                           )}
                         </div>
 

@@ -144,15 +144,38 @@ export interface Product {
   // ── Scalable / weighted product ──
   isScalable?: boolean;
   scaleUnit?: string; // e.g. "kg", "L", "cup", "custom"
-  pricePerUnit?: number; // price per 1 unit
+  pricePerUnit?: number; // price per 1 unit — used for free-form/custom scale entry
   minOrderQty?: number; // e.g. 0.1
   maxOrderQty?: number; // e.g. 10
   scaleStep?: number; // e.g. 0.1
-  scalePresets?: number[]; // e.g. [0.5, 1, 1.5, 2, 3]
+  scalePresets?: number[]; // LEGACY — bare quantity presets, superseded by `variations`
+  variations?: ProductVariation[]; // structured, labeled, individually-priced presets
 
   // Timestamps
   createdAt: string;
   updatedAt: string;
+}
+
+// A structured, labeled preset of a scalable product — e.g. "500g Pack",
+// "1kg Bag", "Starter Cup" — with its OWN price (not forced to equal
+// pricePerUnit × quantity) and optional dedicated stock tracking.
+export interface ProductVariation {
+  id: string;
+  productId: string;
+  label: string;
+  quantity: number; // amount in the parent product's scaleUnit represented by ONE unit
+  price: number; // price for ONE unit of this variation
+  compareAtPrice?: number | null;
+  barcode?: string | null;
+  sku?: string | null;
+  // null = shared stock (deducts from the product's shared stockQuantity pool)
+  // number = dedicated stock (this variation tracks its own on-hand pack count)
+  stockQuantity?: number | null;
+  isDefault: boolean; // "starting preset" — pre-selected on product page / POS
+  isActive: boolean;
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Category {
@@ -201,8 +224,10 @@ export interface CartItem {
   cartId: string;
   productId: string;
   product: Product;
-  quantity: number;
+  quantity: number; // pack count when variationId is set, otherwise raw scale/unit qty
   price: number;
+  variationId?: string | null;
+  variationLabel?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -291,8 +316,11 @@ export interface OrderItem {
   orderId: string;
   productId: string;
   product: Product;
-  quantity: number;
+  quantity: number; // pack count when variationId is set, otherwise raw scale/unit qty
   price: number;
+  variationId?: string | null;
+  variationLabel?: string | null;
+  stockMode?: "SHARED" | "DEDICATED" | null;
   createdAt: string;
   updatedAt: string;
 }

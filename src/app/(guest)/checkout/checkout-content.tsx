@@ -108,6 +108,11 @@ function itemUnit(item: any): string | undefined {
 function itemStep(item: any): number {
   return item.product?.scaleStep ?? item.scaleStep ?? 0.1;
 }
+// Preset-only: scaleStep = 0 — no +/- increment; quantity is fixed to
+// whichever preset weight was selected when the item was added.
+function isPresetOnly(item: any): boolean {
+  return isItemScalable(item) && itemStep(item) === 0;
+}
 function itemMinQty(item: any): number {
   return item.product?.minOrderQty ?? item.minOrderQty ?? itemStep(item);
 }
@@ -120,6 +125,26 @@ function fmtQty(qty: number, unit?: string): string {
   const s =
     qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
   return unit ? `${s} ${unit}` : s;
+}
+// Set when this line is a specific structured variation/preset (e.g. "500g
+// Pack") — its `quantity` means PACK COUNT, not a raw scale amount, so the
+// +/- stepper below must NOT use the product's scaleStep/minOrderQty.
+function isVariationItem(item: any): boolean {
+  return !!item.variationId;
+}
+function itemVariationMaxPacks(item: any): number {
+  if (!item.variationId) return Infinity;
+  const variation = item.product?.variations?.find(
+    (v: any) => v.id === item.variationId,
+  );
+  if (variation) {
+    return variation.stockQuantity !== null && variation.stockQuantity !== undefined
+      ? variation.stockQuantity
+      : item.product?.trackInventory !== false && item.product?.stockQuantity != null
+        ? Math.floor(item.product.stockQuantity / variation.quantity)
+        : Infinity;
+  }
+  return item.product?.stockQuantity ?? Infinity;
 }
 
 // ─── Cart adjuster — shown in order summary sidebar on every step ─────────────
@@ -160,8 +185,17 @@ function CartSummaryAdjuster() {
         const step = itemStep(item);
         const minQty = itemMinQty(item);
         const maxQty = itemMaxQty(item);
+        const presetOnly = !isVariationItem(item) && isPresetOnly(item);
+        const isVariation = isVariationItem(item);
+        const variationMaxPacks = itemVariationMaxPacks(item);
 
         const handleDec = () => {
+          if (isVariation) {
+            if (item.quantity > 1) handleUpdate(item, item.quantity - 1);
+            else handleRemove(item);
+            return;
+          }
+          if (presetOnly) return;
           if (scalable) {
             const next = parseFloat(
               (Math.round((item.quantity - step) / step) * step).toFixed(10),
@@ -172,6 +206,12 @@ function CartSummaryAdjuster() {
           }
         };
         const handleInc = () => {
+          if (isVariation) {
+            if (item.quantity + 1 <= variationMaxPacks)
+              handleUpdate(item, item.quantity + 1);
+            return;
+          }
+          if (presetOnly) return;
           if (scalable) {
             const next = parseFloat(
               (Math.round((item.quantity + step) / step) * step).toFixed(10),
@@ -182,8 +222,18 @@ function CartSummaryAdjuster() {
           }
         };
 
-        const atMin = scalable ? item.quantity <= minQty : item.quantity <= 1;
-        const atMax = item.quantity >= maxQty;
+        const atMin = isVariation
+          ? item.quantity <= 1
+          : presetOnly
+            ? true
+            : scalable
+              ? item.quantity <= minQty
+              : item.quantity <= 1;
+        const atMax = isVariation
+          ? item.quantity >= variationMaxPacks
+          : presetOnly
+            ? true
+            : item.quantity >= maxQty;
 
         return (
           <div key={item.id} className="flex items-center gap-2">
@@ -202,7 +252,16 @@ function CartSummaryAdjuster() {
               <p className="text-xs font-medium text-gray-900 line-clamp-1">
                 {item.product?.name}
               </p>
-              {scalable && unit ? (
+              {item.variationLabel && (
+                <p className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 inline-block px-1 rounded">
+                  {item.variationLabel}
+                </p>
+              )}
+              {item.variationLabel ? (
+                <p className="text-xs text-gray-500">
+                  {formatPrice(item.price)}/pack
+                </p>
+              ) : scalable && unit ? (
                 <p className="text-xs text-green-700 font-semibold flex items-center gap-0.5">
                   <Scale className="w-2.5 h-2.5" />
                   {formatPrice(item.price)}/{unit}
@@ -213,27 +272,33 @@ function CartSummaryAdjuster() {
                 </p>
               )}
             </div>
-            <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
-              <button
-                onClick={handleDec}
-                disabled={atMin}
-                className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
-              >
-                <Minus className="w-3 h-3" />
-              </button>
-              <span
-                className={`text-center text-xs font-semibold ${scalable ? "w-16 px-0.5" : "w-6"}`}
-              >
+            {presetOnly ? (
+              <span className="text-center text-xs font-semibold w-16 px-1 py-1 border border-gray-200 rounded bg-gray-50">
                 {fmtQty(item.quantity, unit)}
               </span>
-              <button
-                onClick={handleInc}
-                disabled={atMax}
-                className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
+                <button
+                  onClick={handleDec}
+                  disabled={atMin}
+                  className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+                >
+                  <Minus className="w-3 h-3" />
+                </button>
+                <span
+                  className={`text-center text-xs font-semibold ${scalable ? "w-16 px-0.5" : "w-6"}`}
+                >
+                  {isVariation ? `×${item.quantity}` : fmtQty(item.quantity, unit)}
+                </span>
+                <button
+                  onClick={handleInc}
+                  disabled={atMax}
+                  className="px-1.5 py-1 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            )}
             <p className="text-xs font-bold w-14 text-right shrink-0">
               {formatPrice(item.price * item.quantity)}
             </p>
@@ -612,9 +677,11 @@ export default function CheckoutPageContent() {
         items: items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
-          // price is already pricePerUnit for scalable, product.price for fixed
-          // (set correctly by cart.controller.ts when item was added)
+          // price is already pricePerUnit for scalable, product.price for fixed,
+          // or the variation's own price when variationId is set (set correctly
+          // by cart.controller.ts when the item was added)
           price: item.price,
+          variationId: item.variationId,
         })),
         subtotal,
         shippingCost,
@@ -1105,7 +1172,11 @@ export default function CheckoutPageContent() {
                           <p className="text-sm font-medium text-gray-900 line-clamp-1">
                             {item.product?.name}
                           </p>
-                          {scalable && unit ? (
+                          {item.variationLabel ? (
+                            <p className="text-xs text-gray-500">
+                              {item.variationLabel} — {item.quantity} × {formatPrice(item.price)}
+                            </p>
+                          ) : scalable && unit ? (
                             <p className="text-xs text-green-700 flex items-center gap-1">
                               <Scale className="w-3 h-3" />
                               {fmtQty(item.quantity, unit)} ×{" "}
