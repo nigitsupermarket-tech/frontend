@@ -315,7 +315,6 @@ export function ProductCard({ product, className }: ProductCardProps) {
               Selected: {qtyDisplay}
             </p>
           )}
-          </div>
 
           {/* Price */}
           <div className="flex items-baseline gap-1 flex-wrap">
@@ -343,9 +342,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
             <button
               onClick={handleAdd}
               disabled={isOutOfStock || cartLoading || !hasSelection}
-              title={
-                !hasSelection ? "Select a preset weight first" : undefined
-              }
+              title={!hasSelection ? "Select a preset weight first" : undefined}
               className={cn(
                 "flex items-center justify-center gap-1 py-1.5 rounded text-[9px] sm:text-xs font-bold uppercase tracking-wide transition-all w-full",
                 addedFeedback
