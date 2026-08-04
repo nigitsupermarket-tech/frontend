@@ -18,8 +18,29 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const { addToCart, isLoading: cartLoading } = useCart();
   const [addedFeedback, setAddedFeedback] = useState(false);
 
-  // ── Scalable product state ─────────────────────────────────────────────────
-  const isScalable = !!product.isScalable;
+  // ── Structured presets (e.g. "500g Pack", "1kg Bag") — takes priority
+  // over the legacy continuous-scale UI below when present, matching the
+  // product detail page's "Choose an option" behavior. ──────────────────
+  const activeVariations = (product.variations || []).filter((v) => v.isActive);
+  const hasVariations = activeVariations.length > 0;
+  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(
+    () => activeVariations.find((v) => v.isDefault)?.id || activeVariations[0]?.id || null,
+  );
+  const selectedVariation =
+    activeVariations.find((v) => v.id === selectedVariationId) || activeVariations[0] || null;
+  const [packCount, setPackCount] = useState(1);
+
+  const variationAvailable = selectedVariation
+    ? selectedVariation.stockQuantity !== null && selectedVariation.stockQuantity !== undefined
+      ? selectedVariation.stockQuantity // dedicated stock — packs on hand
+      : Math.floor((product.stockQuantity || 0) / (selectedVariation.quantity || 1)) // shared pool
+    : 0;
+  const variationOutOfStock =
+    !!selectedVariation && product.trackInventory && variationAvailable <= 0;
+
+  // ── Legacy / continuous scalable product state (used when the product
+  // has NO structured variations) ─────────────────────────────────────────
+  const isScalable = !!product.isScalable && !hasVariations;
   const unit = product.scaleUnit || "unit";
   const step = product.scaleStep ?? 0.1;
   // Preset-only mode: scaleStep is 0, so there's no +/- increment — the
@@ -37,7 +58,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const [quantity, setQuantity] = useState(
     isScalable ? (presetOnly ? 0 : minQty) : 1,
   );
-  const hasSelection = !presetOnly || quantity > 0;
+  const hasSelection = hasVariations ? !!selectedVariation : !presetOnly || quantity > 0;
 
   // parseFloat + toFixed(10) avoids floating-point drift (e.g. 0.1+0.1+0.1 ≠ 0.3)
   const roundStep = (val: number) =>
@@ -63,14 +84,16 @@ export function ProductCard({ product, className }: ProductCardProps) {
     }
   };
 
-  // Effective price shown — for scalable use pricePerUnit × qty, else product.price
-  const effectivePrice =
-    isScalable && product.pricePerUnit
+  // Effective price shown — variation price × packs, scalable pricePerUnit × qty, else product.price
+  const effectivePrice = hasVariations
+    ? (selectedVariation?.price || 0) * packCount
+    : isScalable && product.pricePerUnit
       ? product.pricePerUnit * quantity
       : product.price;
 
-  const isOutOfStock =
-    product.stockStatus === "OUT_OF_STOCK" || product.stockQuantity === 0;
+  const isOutOfStock = hasVariations
+    ? variationOutOfStock
+    : product.stockStatus === "OUT_OF_STOCK" || product.stockQuantity === 0;
 
   const discount =
     product.comparePrice && product.comparePrice > product.price
@@ -81,6 +104,21 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
   const handleAdd = async () => {
     if (isOutOfStock) return;
+    if (hasVariations) {
+      if (!selectedVariation || packCount <= 0) return;
+      await addToCart(product.id, packCount, {
+        price: selectedVariation.price,
+        name: product.name,
+        image: product.images?.[0] || "",
+        sku: selectedVariation.sku || product.sku,
+        stockQuantity: variationAvailable,
+        variationId: selectedVariation.id,
+        variationLabel: selectedVariation.label,
+      });
+      setAddedFeedback(true);
+      setTimeout(() => setAddedFeedback(false), 1500);
+      return;
+    }
     if (presetOnly && quantity <= 0) return; // must tap a preset first
     await addToCart(product.id, quantity, {
       price:
@@ -177,6 +215,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
               <Scale className="w-2 h-2" /> per {unit}
             </span>
           )}
+          {hasVariations && (
+            <span className="absolute bottom-1 left-1 flex items-center gap-0.5 bg-green-700 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">
+              <Scale className="w-2 h-2" /> {activeVariations.length} options
+            </span>
+          )}
           {product.isOnPromotion && !discount && (
             <span className="absolute top-1 right-1 bg-amber-500 text-white text-[9px] font-bold px-1 py-0.5 rounded">
               PROMO
@@ -196,7 +239,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
           {/* Weight / units row */}
           <div className="flex items-start justify-between gap-1">
             <span className="text-[10px] sm:text-xs leading-tight">
-              {isScalable ? (
+              {hasVariations ? (
+                <span className="font-semibold text-green-700">
+                  {selectedVariation ? formatPrice(selectedVariation.price) : ""} / {selectedVariation?.label}
+                </span>
+              ) : isScalable ? (
                 <span className="font-semibold text-green-700">
                   {product.pricePerUnit
                     ? `${formatPrice(product.pricePerUnit)}/${unit}`
@@ -239,8 +286,86 @@ export function ProductCard({ product, className }: ProductCardProps) {
             )}
           </div>
 
-          {/* ── Scalable presets ── */}
-          {isScalable && presets.length > 0 && (
+          {/* ── Structured presets (e.g. "240 G" / "290 G") ── */}
+          {hasVariations && (
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide">
+                Choose an option:
+              </span>
+              <div className="flex flex-wrap gap-1">
+                {activeVariations.map((v) => {
+                  const packsAvailable =
+                    v.stockQuantity !== null && v.stockQuantity !== undefined
+                      ? v.stockQuantity
+                      : Math.floor((product.stockQuantity || 0) / (v.quantity || 1));
+                  const soldOut = product.trackInventory && packsAvailable <= 0;
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => {
+                        setSelectedVariationId(v.id);
+                        setPackCount(1);
+                      }}
+                      disabled={soldOut}
+                      className={cn(
+                        "text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded border transition-colors",
+                        soldOut
+                          ? "border-gray-200 text-gray-300 cursor-not-allowed line-through"
+                          : selectedVariationId === v.id
+                            ? "bg-green-600 text-white border-green-600"
+                            : "border-gray-300 text-gray-600 hover:border-green-500",
+                      )}
+                    >
+                      {v.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Pack-count stepper for structured presets */}
+          {hasVariations && (
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
+                  QTY:
+                </span>
+                <div className="flex items-center border border-gray-300">
+                  <button
+                    onClick={() => setPackCount((q) => Math.max(1, q - 1))}
+                    disabled={packCount <= 1}
+                    className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Minus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                  </button>
+                  <span className="w-10 sm:w-12 text-center text-[9px] sm:text-[10px] font-medium text-gray-800 px-0.5">
+                    {packCount}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setPackCount((q) =>
+                        product.trackInventory ? Math.min(q + 1, variationAvailable) : q + 1,
+                      )
+                    }
+                    disabled={product.trackInventory && packCount >= variationAvailable}
+                    className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
+                  </button>
+                </div>
+              </div>
+              {product.trackInventory && variationAvailable > 0 && (
+                <p className="text-[8px] sm:text-[9px] text-gray-400 font-medium leading-tight">
+                  {variationAvailable} available
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Legacy bare-number presets (superseded by structured variations
+              above — only rendered when the product has none) ── */}
+          {!hasVariations && isScalable && presets.length > 0 && (
             <div className="flex flex-col gap-0.5">
               {presetOnly && (
                 <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide">
@@ -267,10 +392,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
             </div>
           )}
 
-          {/* QTY / scale selector — hidden in preset-only mode (scaleStep = 0):
+          {/* QTY / scale selector — hidden in preset-only mode (scaleStep = 0)
+              and when the product uses structured variations instead:
               no +/- increment is offered, the presets above are the only way
               to choose a quantity. */}
-          {!presetOnly && (
+          {!hasVariations && !presetOnly && (
             <div className="flex flex-col gap-0.5">
               <div className="flex items-center gap-1">
                 <span className="text-[8px] sm:text-[9px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
@@ -310,7 +436,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
                 )}
             </div>
           )}
-          {presetOnly && quantity > 0 && (
+          {!hasVariations && presetOnly && quantity > 0 && (
             <p className="text-[8px] sm:text-[9px] text-gray-500 font-medium leading-tight">
               Selected: {qtyDisplay}
             </p>
@@ -321,7 +447,15 @@ export function ProductCard({ product, className }: ProductCardProps) {
             <span className="text-xs sm:text-sm font-bold text-gray-900">
               {formatPrice(effectivePrice)}
             </span>
-            {!isScalable &&
+            {hasVariations &&
+              selectedVariation?.compareAtPrice &&
+              selectedVariation.compareAtPrice > selectedVariation.price && (
+                <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
+                  {formatPrice(selectedVariation.compareAtPrice * packCount)}
+                </span>
+              )}
+            {!hasVariations &&
+              !isScalable &&
               product.comparePrice &&
               product.comparePrice > product.price && (
                 <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">

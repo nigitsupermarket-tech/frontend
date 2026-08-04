@@ -907,6 +907,11 @@ export default function POSPage() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  // Mirrors POSProductGrid's pickerProduct — the search bar and barcode
+  // scanner are a separate render tree from the Quick-Add Grid, so they need
+  // their own picker state to prompt for an option/preset instead of
+  // silently falling through to the continuous-scale "₦/kg" default.
+  const [searchPickerProduct, setSearchPickerProduct] = useState<Product | null>(null);
 
   // Customer — "WALK_IN" is the generic walking customer option
   const [customerType, setCustomerType] = useState<"WALK_IN" | "NAMED">(
@@ -1085,7 +1090,7 @@ export default function POSPage() {
           product.barcode === code
             ? undefined
             : (product.variations || []).find((v: ProductVariation) => v.barcode === code);
-        addToCart(product, undefined, matchedVariation);
+        addOrPickVariation(product, matchedVariation);
         if (barcodeRef.current) barcodeRef.current.value = "";
       } else toast(`No product for barcode: ${code}`, "error");
     } catch {
@@ -1259,6 +1264,28 @@ export default function POSPage() {
     setShowSearch(false);
     setSearchQuery("");
     setSearchResults([]);
+  };
+
+  // Used by both the search-results dropdown and barcode scan: a product
+  // with structured variations (or a legacy preset-only scalable product)
+  // can't be added with a single click — which option/weight it is has to
+  // be chosen first. `matchedVariation` is already resolved when a scan hit
+  // a specific preset's own barcode, so that case skips the picker.
+  const addOrPickVariation = (product: Product, matchedVariation?: ProductVariation) => {
+    if (matchedVariation) {
+      addToCart(product, undefined, matchedVariation);
+      return;
+    }
+    const activeVariations = (product.variations || []).filter((v) => v.isActive);
+    const hasVariations = activeVariations.length > 0;
+    const presetOnly =
+      !hasVariations && !!product.isScalable && (product.scaleStep ?? 0.1) === 0;
+    if (hasVariations || presetOnly) {
+      setSearchPickerProduct(product);
+      setShowSearch(false);
+      return;
+    }
+    addToCart(product);
   };
 
   const updateQty = (productId: string, qty: number, variationId?: string) => {
@@ -1787,7 +1814,7 @@ export default function POSPage() {
                     {searchResults.map((product) => (
                       <button
                         key={product.id}
-                        onClick={() => addToCart(product)}
+                        onClick={() => addOrPickVariation(product)}
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 text-left border-b border-gray-100 last:border-0"
                       >
                         <div className="w-8 h-8 bg-gray-100 rounded flex-shrink-0 overflow-hidden">
@@ -1810,12 +1837,22 @@ export default function POSPage() {
                         </div>
                         <div className="text-right flex-shrink-0">
                           <p className="text-sm font-bold">
-                            {product.isScalable && product.pricePerUnit
-                              ? `${formatPrice(product.pricePerUnit)}/${product.scaleUnit || "unit"}`
-                              : formatPrice(product.price)}
+                            {(product.variations || []).filter((v) => v.isActive).length > 0
+                              ? `From ${formatPrice(
+                                  Math.min(
+                                    ...(product.variations || [])
+                                      .filter((v) => v.isActive)
+                                      .map((v) => v.price),
+                                  ),
+                                )}`
+                              : product.isScalable && product.pricePerUnit
+                                ? `${formatPrice(product.pricePerUnit)}/${product.scaleUnit || "unit"}`
+                                : formatPrice(product.price)}
                           </p>
                           <p className="text-xs text-gray-400">
-                            Qty: {product.stockQuantity}
+                            {(product.variations || []).filter((v) => v.isActive).length > 0
+                              ? "Tap to choose"
+                              : `Qty: ${product.stockQuantity}`}
                           </p>
                         </div>
                       </button>
@@ -1858,6 +1895,106 @@ export default function POSPage() {
               onAddToCart={addToCart}
               cart={cart}
             />
+          )}
+
+          {/* Option picker for products found via Search/Scan or barcode —
+              mirrors POSProductGrid's picker so choosing a preset works the
+              same way no matter how the product was found. */}
+          {searchPickerProduct && (
+            <div
+              className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4"
+              onClick={() => setSearchPickerProduct(null)}
+            >
+              <div
+                className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-sm font-bold text-gray-900 line-clamp-2">
+                  {searchPickerProduct.name}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                  Select an option to add it to the sale.
+                </p>
+                {(searchPickerProduct.variations || []).filter((v) => v.isActive).length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {(searchPickerProduct.variations || [])
+                      .filter((v) => v.isActive)
+                      .map((v) => {
+                        const dedicated =
+                          v.stockQuantity !== null && v.stockQuantity !== undefined;
+                        const available = dedicated
+                          ? (v.stockQuantity as number)
+                          : searchPickerProduct.trackInventory
+                            ? Math.floor((searchPickerProduct.stockQuantity ?? Infinity) / v.quantity)
+                            : Infinity;
+                        const soldOut = available <= 0;
+                        return (
+                          <button
+                            key={v.id}
+                            disabled={soldOut}
+                            onClick={() => {
+                              addToCart(searchPickerProduct, undefined, v);
+                              setSearchPickerProduct(null);
+                            }}
+                            className={`flex items-center justify-between px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                              soldOut
+                                ? "border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed"
+                                : "border-gray-200 hover:border-green-500 hover:bg-green-50"
+                            }`}
+                          >
+                            <span>
+                              <span className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                                {v.label}
+                                {v.isDefault && (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1 rounded">
+                                    DEFAULT
+                                  </span>
+                                )}
+                              </span>
+                              <span className="block text-[11px] text-gray-400 mt-0.5">
+                                {soldOut
+                                  ? "Out of stock"
+                                  : Number.isFinite(available)
+                                    ? `${available} available`
+                                    : "In stock"}
+                              </span>
+                            </span>
+                            <span className="text-sm font-bold text-green-700">
+                              {formatPrice(v.price)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                ) : (searchPickerProduct.scalePresets || []).length === 0 ? (
+                  <p className="text-xs text-red-500">
+                    No preset weights are configured for this product. Contact an
+                    admin to add some in Product Settings.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(searchPickerProduct.scalePresets || []).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => {
+                          addToCart(searchPickerProduct, p);
+                          setSearchPickerProduct(null);
+                        }}
+                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm font-semibold text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                      >
+                        {p} {searchPickerProduct.scaleUnit || "unit"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => setSearchPickerProduct(null)}
+                  className="mt-4 w-full py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

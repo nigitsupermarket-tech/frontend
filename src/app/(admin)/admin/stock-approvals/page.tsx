@@ -26,6 +26,8 @@ interface StockRequest {
   productId: string;
   productName: string;
   productSku: string;
+  variationId?: string;
+  variationLabel?: string;
   requestedByName: string;
   currentQty: number;
   requestedQty: number;
@@ -36,7 +38,7 @@ interface StockRequest {
   reviewedAt?: string;
   reviewNote?: string;
   createdAt: string;
-  product?: { images: string[] };
+  product?: { images: string[]; isScalable?: boolean; scaleUnit?: string };
 }
 
 const STATUS_COLORS = {
@@ -48,6 +50,7 @@ const STATUS_COLORS = {
 const SOURCE_LABELS: Record<string, string> = {
   INVENTORY: "Inventory Page",
   PRODUCT_UPDATE: "Product Edit",
+  PRODUCT_FORM: "Product Edit",
 };
 
 export default function StockApprovalsPage() {
@@ -422,6 +425,15 @@ export default function StockApprovalsPage() {
                             <p className="text-xs text-gray-400 font-mono">
                               {req.productSku}
                             </p>
+                            {req.variationLabel ? (
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
+                                Preset: {req.variationLabel}
+                              </span>
+                            ) : req.product?.isScalable ? (
+                              <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                                Per unit ({req.product.scaleUnit || "unit"})
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </td>

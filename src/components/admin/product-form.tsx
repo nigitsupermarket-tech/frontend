@@ -5,7 +5,7 @@
 // nutritionalInfo, storageInstructions, isHalal, isOrganic, naifdaNumber, isOnPromotion
 // V2 — scalable/weighted product type (sell by weight, volume, or custom unit)
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Plus, X, Tag, Scale, RefreshCw } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
@@ -275,6 +275,11 @@ export default function ProductForm({ productId, onSave }: Props) {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [variations, setVariations] = useState<VariationDraft[]>([]);
+  // Snapshot of each existing variation's dedicated stockQuantity as loaded
+  // from the server, keyed by variation id — used to detect staff edits to
+  // preset stock so they can be routed through admin approval, the same way
+  // a product-level stockQuantity edit already is (see handleSubmit below).
+  const originalVariationStockRef = useRef<Record<string, number | null>>({});
   const [activeTab, setActiveTab] = useState("basic");
 
   useEffect(() => {
@@ -368,31 +373,41 @@ export default function ProductForm({ productId, onSave }: Props) {
             scalePresets: (p.scalePresets || []).join(", "),
           });
 
-          setVariations(
-            (p.variations || [])
-              .slice()
-              .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-              .map((v: any) => ({
-                _key: makeVariationKey(),
-                id: v.id,
-                label: v.label || "",
-                quantity: String(v.quantity ?? ""),
-                price: String(v.price ?? ""),
-                compareAtPrice:
-                  v.compareAtPrice !== null && v.compareAtPrice !== undefined
-                    ? String(v.compareAtPrice)
-                    : "",
-                barcode: v.barcode || "",
-                dedicatedStock:
-                  v.stockQuantity !== null && v.stockQuantity !== undefined,
-                stockQuantity:
-                  v.stockQuantity !== null && v.stockQuantity !== undefined
-                    ? String(v.stockQuantity)
-                    : "",
-                isDefault: !!v.isDefault,
-                isActive: v.isActive !== false,
-              })),
-          );
+          const loadedVariations = (p.variations || [])
+            .slice()
+            .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((v: any) => ({
+              _key: makeVariationKey(),
+              id: v.id,
+              label: v.label || "",
+              quantity: String(v.quantity ?? ""),
+              price: String(v.price ?? ""),
+              compareAtPrice:
+                v.compareAtPrice !== null && v.compareAtPrice !== undefined
+                  ? String(v.compareAtPrice)
+                  : "",
+              barcode: v.barcode || "",
+              dedicatedStock:
+                v.stockQuantity !== null && v.stockQuantity !== undefined,
+              stockQuantity:
+                v.stockQuantity !== null && v.stockQuantity !== undefined
+                  ? String(v.stockQuantity)
+                  : "",
+              isDefault: !!v.isDefault,
+              isActive: v.isActive !== false,
+            }));
+          setVariations(loadedVariations);
+
+          // Snapshot dedicated stock as-loaded so we can detect staff edits
+          // to a preset's stock at save time (see handleSubmit).
+          const stockSnapshot: Record<string, number | null> = {};
+          (p.variations || []).forEach((v: any) => {
+            stockSnapshot[v.id] =
+              v.stockQuantity !== null && v.stockQuantity !== undefined
+                ? v.stockQuantity
+                : null;
+          });
+          originalVariationStockRef.current = stockSnapshot;
         }
       } catch (err) {
         toast.error(getApiError(err));
@@ -635,68 +650,128 @@ export default function ProductForm({ productId, onSave }: Props) {
 
     setSaving(true);
     try {
-      // When a Staff or Sales user edits an existing product and the
-      // stockQuantity field has changed, we submit a stock-approval request
-      // instead of writing it directly. Other fields are still saved normally.
+      // When a Staff or Sales user edits an existing product, any change to
+      // the product's own stockQuantity OR to an existing variation's
+      // dedicated preset stock goes through admin approval instead of being
+      // written directly — same rule, extended to cover presets. Non-stock
+      // edits (name, price, a variation's label/price/etc.) still save
+      // immediately; only the stock number itself is gated.
       if (!isAdmin && productId) {
         const originalRes = await apiGet<any>(`/products/${productId}`);
-        const originalQty: number =
-          originalRes.data?.product?.stockQuantity ?? 0;
+        const originalProduct = originalRes.data?.product;
+        const originalQty: number = originalProduct?.stockQuantity ?? 0;
         const newQty = Number(form.stockQuantity);
 
-        if (newQty !== originalQty) {
-          // Submit stock change for admin approval
-          const approvalRes = await apiPost<any>("/stock-approvals", {
-            productId,
-            requestedQty: newQty,
-            reason: `Product form edit by ${user?.name || "staff"} (${user?.role})`,
-            source: "PRODUCT_FORM",
-          });
+        const activeVariations = variations.filter((v) => v.label.trim());
 
-          if (approvalRes.data?.autoApproved) {
+        // Collect every stock-approval request this save implies: the
+        // product-level pool, plus any EXISTING variation whose dedicated
+        // stock number actually changed. New variations (no id yet) keep
+        // whatever initial stock is entered — there's no prior approved
+        // value to protect, same as a brand-new product's initial stock.
+        const pendingApprovals: { variationId?: string; requestedQty: number; label: string }[] = [];
+        if (newQty !== originalQty) {
+          pendingApprovals.push({ requestedQty: newQty, label: "the product" });
+        }
+        for (const v of activeVariations) {
+          if (!v.id) continue;
+          const originalStock = originalVariationStockRef.current[v.id] ?? null;
+          const newStock =
+            v.dedicatedStock && v.stockQuantity !== "" ? parseFloat(v.stockQuantity) : null;
+          if (newStock !== null && newStock !== originalStock) {
+            pendingApprovals.push({ variationId: v.id, requestedQty: newStock, label: v.label });
+          }
+        }
+
+        if (pendingApprovals.length > 0) {
+          const results = await Promise.allSettled(
+            pendingApprovals.map((p) =>
+              apiPost<any>("/stock-approvals", {
+                productId,
+                variationId: p.variationId,
+                requestedQty: p.requestedQty,
+                reason: `Product form edit by ${user?.name || "staff"} (${user?.role}) — ${p.label}`,
+                source: "PRODUCT_FORM",
+              }),
+            ),
+          );
+          const failures = results.filter((r) => r.status === "rejected");
+          const allAutoApproved = results.every(
+            (r) => r.status === "fulfilled" && (r.value as any).data?.autoApproved,
+          );
+          if (failures.length > 0) {
+            toast.error(getApiError((failures[0] as PromiseRejectedResult).reason));
+          } else if (allAutoApproved) {
             toast.success("Stock updated");
           } else {
             toast.success(
-              "Stock change submitted — awaiting admin approval. Other product fields saved.",
+              `${pendingApprovals.length > 1 ? "Stock changes" : "Stock change"} submitted — awaiting admin approval. Other product fields saved.`,
             );
           }
-
-          // Save the rest of the product without the stockQuantity override
-          const images = form.media
-            .filter((m) => m.type === "image")
-            .map((m) => m.url);
-          const nutritionalInfo: any = {};
-          Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
-            if (v) nutritionalInfo[k] = parseFloat(v as string);
-          });
-          const payloadNoStock: any = {
-            name: form.name,
-            slug: form.slug || generateSlug(form.name),
-            description: form.description,
-            shortDescription: form.shortDescription,
-            price: parseFloat(form.price),
-            comparePrice: form.comparePrice ? parseFloat(form.comparePrice) : undefined,
-            costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
-            sku: form.sku,
-            barcode: form.barcode || undefined,
-            categoryId: form.categoryId,
-            brandId: form.brandId || undefined,
-            tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-            images,
-            lowStockThreshold: Number(form.lowStockThreshold),
-            allowBackorder: form.allowBackorder,
-            trackInventory: form.trackInventory,
-            isFeatured: form.isFeatured,
-            isNewArrival: form.isNewArrival,
-            isOnPromotion: form.isOnPromotion,
-            promotionEndsAt: form.promotionEndsAt ? new Date(form.promotionEndsAt).toISOString() : null,
-            status: form.status,
-          };
-          await apiPut(`/products/${productId}`, payloadNoStock);
-          onSave?.();
-          setSaving(false);
-          return;
         }
+
+        // Save the rest of the product without any stockQuantity override —
+        // variations keep their non-stock edits, but any EXISTING variation's
+        // dedicated stock is forced back to its pre-edit value (the number
+        // above is what actually gets applied, once approved).
+        const images = form.media
+          .filter((m) => m.type === "image")
+          .map((m) => m.url);
+        const nutritionalInfo: any = {};
+        Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
+          if (v) nutritionalInfo[k] = parseFloat(v as string);
+        });
+        const variationsPayload = form.isScalable
+          ? activeVariations.map((v) => ({
+              id: v.id,
+              label: v.label.trim(),
+              quantity: parseFloat(v.quantity),
+              price: parseFloat(v.price),
+              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+              barcode: v.barcode.trim() || null,
+              stockQuantity: v.id
+                ? (originalVariationStockRef.current[v.id] ?? null)
+                : v.dedicatedStock && v.stockQuantity !== ""
+                  ? parseFloat(v.stockQuantity)
+                  : null,
+              isDefault: v.isDefault,
+              isActive: v.isActive,
+            }))
+          : [];
+        const payloadNoStock: any = {
+          name: form.name,
+          slug: form.slug || generateSlug(form.name),
+          description: form.description,
+          shortDescription: form.shortDescription,
+          price: parseFloat(form.price),
+          comparePrice: form.comparePrice ? parseFloat(form.comparePrice) : undefined,
+          costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
+          sku: form.sku,
+          barcode: form.barcode || undefined,
+          categoryId: form.categoryId,
+          brandId: form.brandId || undefined,
+          tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+          images,
+          lowStockThreshold: Number(form.lowStockThreshold),
+          allowBackorder: form.allowBackorder,
+          trackInventory: form.trackInventory,
+          isFeatured: form.isFeatured,
+          isNewArrival: form.isNewArrival,
+          isOnPromotion: form.isOnPromotion,
+          promotionEndsAt: form.promotionEndsAt ? new Date(form.promotionEndsAt).toISOString() : null,
+          status: form.status,
+          isScalable: form.isScalable,
+          scaleUnit: form.isScalable ? (form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit) : undefined,
+          pricePerUnit: form.isScalable && form.pricePerUnit ? parseFloat(form.pricePerUnit) : undefined,
+          minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
+          maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
+          scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
+          variations: variationsPayload,
+        };
+        await apiPut(`/products/${productId}`, payloadNoStock);
+        onSave?.();
+        setSaving(false);
+        return;
       }
       const images = form.media
         .filter((m) => m.type === "image")

@@ -12,7 +12,7 @@ import {
 import Image from "next/image";
 
 interface InventoryItem {
-  id: string;
+  id: string; // always the PRODUCT id, even for a variation row
   name: string;
   sku: string;
   barcode?: string;
@@ -21,7 +21,17 @@ interface InventoryItem {
   lowStockThreshold: number;
   stockStatus?: string;
   category?: { name: string };
+  // Set when this row is a specific preset's OWN dedicated stock rather
+  // than the product's shared pool — e.g. "290 G" packs running low while
+  // the rest of the product is fine.
+  variationId?: string;
+  variationLabel?: string;
 }
+
+// A product can appear twice (once for its shared pool, once per low/out
+// preset) — the row key has to account for that, unlike a plain product id.
+const rowKey = (item: InventoryItem) =>
+  item.variationId ? `${item.id}::${item.variationId}` : item.id;
 
 const stockColors: Record<string, string> = {
   IN_STOCK: "bg-green-100 text-green-700",
@@ -36,6 +46,7 @@ export default function AdminInventoryPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<{
     id: string;
+    variationId?: string;
     qty: string;
     reason: string;
   } | null>(null);
@@ -53,6 +64,7 @@ export default function AdminInventoryPage() {
       item.name.toLowerCase().includes(q) ||
       item.sku.toLowerCase().includes(q) ||
       (item.barcode && item.barcode.toLowerCase().includes(q)) ||
+      (item.variationLabel && item.variationLabel.toLowerCase().includes(q)) ||
       (item.category?.name && item.category.name.toLowerCase().includes(q))
     );
   });
@@ -72,7 +84,7 @@ export default function AdminInventoryPage() {
         }),
       );
       const all = [...out, ...low].filter(
-        (v, i, a) => a.findIndex((x) => x.id === v.id) === i,
+        (v, i, a) => a.findIndex((x) => rowKey(x) === rowKey(v)) === i,
       );
       if (filter === "all") setItems(all);
       else if (filter === "low") setItems(low);
@@ -94,6 +106,7 @@ export default function AdminInventoryPage() {
     try {
       const res = await apiPost<any>("/stock-approvals", {
         productId: editing.id,
+        variationId: editing.variationId,
         requestedQty: Number(editing.qty),
         reason: editing.reason || undefined,
         source: "INVENTORY",
@@ -135,7 +148,7 @@ export default function AdminInventoryPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, SKU, barcode…"
+              placeholder="Search name, SKU, barcode, preset…"
               className="pl-8 pr-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-brand-400 w-52"
             />
           </div>
@@ -190,9 +203,13 @@ export default function AdminInventoryPage() {
                   </td>
                 </tr>
               ) : (
-                filteredItems.map((item) => (
+                filteredItems.map((item) => {
+                  const key = rowKey(item);
+                  const isEditingThis =
+                    editing?.id === item.id && editing?.variationId === item.variationId;
+                  return (
                   <tr
-                    key={item.id}
+                    key={key}
                     className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
                   >
                     <td className="px-4 py-3">
@@ -207,9 +224,16 @@ export default function AdminInventoryPage() {
                           width={36}
                           height={36}
                         />
-                        <span className="font-medium text-gray-900 line-clamp-1">
-                          {item.name}
-                        </span>
+                        <div>
+                          <span className="font-medium text-gray-900 line-clamp-1 block">
+                            {item.name}
+                          </span>
+                          {item.variationLabel && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
+                              Preset: {item.variationLabel}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">
@@ -222,13 +246,13 @@ export default function AdminInventoryPage() {
                       {item.category?.name || "—"}
                     </td>
                     <td className="px-4 py-3">
-                      {editing?.id === item.id ? (
+                      {isEditingThis ? (
                         <input
                           type="number"
                           min={0}
-                          value={editing.qty}
+                          value={editing!.qty}
                           onChange={(e) =>
-                            setEditing({ ...editing, qty: e.target.value })
+                            setEditing({ ...editing!, qty: e.target.value })
                           }
                           className="w-20 px-2 py-1 rounded-lg border border-brand-300 text-sm focus:outline-none"
                           autoFocus
@@ -254,13 +278,13 @@ export default function AdminInventoryPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {editing?.id === item.id ? (
+                      {isEditingThis ? (
                         <div className="space-y-1.5">
                           <input
                             placeholder="Reason (optional)"
-                            value={editing.reason}
+                            value={editing!.reason}
                             onChange={(e) =>
-                              setEditing({ ...editing, reason: e.target.value })
+                              setEditing({ ...editing!, reason: e.target.value })
                             }
                             className="w-40 px-2 py-1 rounded-lg border border-gray-200 text-xs focus:outline-none"
                           />
@@ -298,6 +322,7 @@ export default function AdminInventoryPage() {
                           onClick={() =>
                             setEditing({
                               id: item.id,
+                              variationId: item.variationId,
                               qty: item.stockQuantity.toString(),
                               reason: "",
                             })
@@ -309,7 +334,8 @@ export default function AdminInventoryPage() {
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
