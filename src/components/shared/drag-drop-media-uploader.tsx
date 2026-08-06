@@ -9,6 +9,7 @@ import {
   Video,
   Plus,
   X,
+  AlertTriangle,
 } from "lucide-react";
 import { apiUpload, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -52,6 +53,7 @@ export function DragDropMediaUploader({
   const [uploading, setUploading] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [urlInput, setUrlInput] = useState("");
+  const [brokenUrls, setBrokenUrls] = useState<Set<string>>(new Set());
   const toast = useToast();
 
   const handleFileUpload = async (files: FileList | null) => {
@@ -272,6 +274,16 @@ export function DragDropMediaUploader({
                     {item.url.split("/").pop()?.substring(0, 20)}...
                   </div>
                 </div>
+              ) : brokenUrls.has(item.url) ? (
+                <div
+                  className="w-full h-full bg-red-50 flex flex-col items-center justify-center gap-1 p-2 text-center"
+                  title={item.url}
+                >
+                  <AlertTriangle className="w-6 h-6 text-red-400" />
+                  <span className="text-[9px] text-red-500 font-medium leading-tight">
+                    Image failed to load
+                  </span>
+                </div>
               ) : (
                 <Image
                   src={item.url}
@@ -280,6 +292,9 @@ export function DragDropMediaUploader({
                   loading="lazy"
                   width={500}
                   height={500}
+                  onError={() =>
+                    setBrokenUrls((prev) => new Set(prev).add(item.url))
+                  }
                 />
               )}
             </div>

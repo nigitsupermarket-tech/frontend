@@ -169,6 +169,9 @@ export default function ProductDetailPage() {
   );
 
   const [selectedImage, setSelectedImage] = useState(0);
+  // Any image URL that fails to load falls back to the placeholder instead
+  // of showing a broken icon (e.g. a deleted Cloudinary asset).
+  const [brokenImageUrls, setBrokenImageUrls] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<
     "description" | "nutrition" | "reviews"
   >("description");
@@ -382,12 +385,21 @@ export default function ProductDetailPage() {
                 </span>
               )}
               <Image
-                src={getProductImage(product.images, selectedImage)}
+                src={
+                  brokenImageUrls.has(getProductImage(product.images, selectedImage))
+                    ? "/images/placeholder-product.png"
+                    : getProductImage(product.images, selectedImage)
+                }
                 alt={product.name}
                 className="w-full h-full object-cover"
                 width={600}
                 height={600}
                 priority
+                onError={() =>
+                  setBrokenImageUrls((prev) =>
+                    new Set(prev).add(getProductImage(product.images, selectedImage)),
+                  )
+                }
               />
             </div>
             {product.images.length > 1 && (
@@ -403,11 +415,14 @@ export default function ProductDetailPage() {
                     }`}
                   >
                     <Image
-                      src={img}
+                      src={brokenImageUrls.has(img) ? "/images/placeholder-product.png" : img}
                       alt={`view ${i + 1}`}
                       className="w-full h-full object-cover"
                       width={80}
                       height={80}
+                      onError={() =>
+                        setBrokenImageUrls((prev) => new Set(prev).add(img))
+                      }
                     />
                   </button>
                 ))}

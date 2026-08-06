@@ -17,6 +17,10 @@ interface ProductCardProps {
 export function ProductCard({ product, className }: ProductCardProps) {
   const { addToCart, isLoading: cartLoading } = useCart();
   const [addedFeedback, setAddedFeedback] = useState(false);
+  // Falls back to the placeholder if the stored image URL 404s/fails to
+  // load (e.g. deleted from Cloudinary, or the optimizer can't reach it) —
+  // shows a plain broken icon otherwise.
+  const [imgFailed, setImgFailed] = useState(false);
 
   // ── Structured presets (e.g. "500g Pack", "1kg Bag") — takes priority
   // over the legacy continuous-scale UI below when present, matching the
@@ -199,11 +203,12 @@ export function ProductCard({ product, className }: ProductCardProps) {
           className="relative w-1/2 shrink-0 aspect-square bg-gray-50 border-r border-gray-100 overflow-hidden block"
         >
           <Image
-            src={getProductImage(product.images)}
+            src={imgFailed ? "/images/placeholder-product.png" : getProductImage(product.images)}
             alt={product.name}
             fill
             className="object-contain p-2"
             sizes="(max-width: 768px) 40vw, (max-width: 1280px) 20vw, 15vw"
+            onError={() => setImgFailed(true)}
           />
           {discount > 0 && (
             <span className="absolute top-1 left-1 bg-red-500 text-white text-[9px] font-bold px-1 py-0.5 rounded">
