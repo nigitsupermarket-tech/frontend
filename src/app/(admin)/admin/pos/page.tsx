@@ -38,6 +38,9 @@ import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatPrice } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
+import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
+import ScalePanel from "@/components/admin/pos/ScalePanel";
+import WeighModal from "@/components/admin/pos/WeighModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProductVariation {
@@ -613,6 +616,12 @@ interface POSProductGridProps {
     variation?: ProductVariation,
   ) => void;
   cart: CartItem[];
+  // Live checkout scale — when connected, tapping a weigh-eligible product
+  // (loose, sold by kg/g, no pre-packaged variations) opens the weigh
+  // modal instead of adding a default quantity.
+  isScaleConnected: boolean;
+  isWeighEligible: (product: Product) => boolean;
+  onWeighProduct: (product: Product) => void;
 }
 
 function POSProductGrid({
@@ -623,6 +632,9 @@ function POSProductGrid({
   loading,
   onAddToCart,
   cart,
+  isScaleConnected,
+  isWeighEligible,
+  onWeighProduct,
 }: POSProductGridProps) {
   // Preset-only products (scaleStep = 0) can't be added with a default
   // quantity — tapping the tile opens this inline picker so the cashier
@@ -695,6 +707,8 @@ function POSProductGrid({
                     if (outOfStock) return;
                     if (hasVariations || presetOnly) {
                       setPickerProduct(product);
+                    } else if (isScaleConnected && isWeighEligible(product)) {
+                      onWeighProduct(product);
                     } else {
                       onAddToCart(product);
                     }
@@ -752,6 +766,12 @@ function POSProductGrid({
                   {!outOfStock && !hasVariations && product.isScalable && (
                     <span className="absolute top-1.5 left-1.5 bg-green-700 text-white text-[8px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
                       ⚖ {product.scaleUnit || "unit"}
+                      {isScaleConnected && isWeighEligible(product) && (
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-lime-300 animate-pulse ml-0.5"
+                          title="Live scale ready"
+                        />
+                      )}
                     </span>
                   )}
 
@@ -893,7 +913,16 @@ function POSProductGrid({
 }
 
 export default function POSPage() {
+  return (
+    <ScaleProvider>
+      <POSPageInner />
+    </ScaleProvider>
+  );
+}
+
+function POSPageInner() {
   const { user } = useAuthStore();
+  const scale = useScale();
   const toast = useToast();
 
   // Session state
@@ -912,6 +941,9 @@ export default function POSPage() {
   // their own picker state to prompt for an option/preset instead of
   // silently falling through to the continuous-scale "₦/kg" default.
   const [searchPickerProduct, setSearchPickerProduct] = useState<Product | null>(null);
+  // Product currently being weighed on the connected checkout scale (loose
+  // items sold by weight — see the "Live weighing" section below).
+  const [weighProduct, setWeighProduct] = useState<Product | null>(null);
 
   // Customer — "WALK_IN" is the generic walking customer option
   const [customerType, setCustomerType] = useState<"WALK_IN" | "NAMED">(
@@ -1266,6 +1298,66 @@ export default function POSPage() {
     setSearchResults([]);
   };
 
+  // ── Live weighing (checkout scale) ──────────────────────────────────────
+  // Only loose products actually sold in a mass unit the physical scale can
+  // read (kg/g) go through the "put it on the scale" flow. Pre-packaged
+  // variations (e.g. "500g Pack") and volume/count-based scalable products
+  // (L, cup, custom) keep their existing picker/step behaviour untouched.
+  const isWeighEligible = (product: Product) => {
+    const activeVariations = (product.variations || []).filter((v) => v.isActive);
+    if (activeVariations.length > 0) return false;
+    if (!product.isScalable) return false;
+    if ((product.scaleStep ?? 0.1) === 0) return false; // preset-only
+    return product.scaleUnit === "kg" || product.scaleUnit === "g";
+  };
+
+  // Reads the live, stable weight off the connected scale and adds/merges
+  // it into the cart line for this product (summed with any existing
+  // weighed quantity for the same product, matching how the rest of the
+  // cart already treats one line per product).
+  const addWeighedToCart = (product: Product, weightKg: number) => {
+    const quantityInScaleUnit =
+      product.scaleUnit === "g" ? weightKg * 1000 : weightKg;
+    const step = product.scaleStep ?? 0.1;
+    const rounded = parseFloat(
+      (Math.round(quantityInScaleUnit / step) * step).toFixed(10),
+    );
+    const unit = product.scaleUnit || "unit";
+    const minQty = product.minOrderQty || step;
+    if (rounded < minQty) {
+      toast(`Weight is below the minimum sale of ${minQty} ${unit}`, "error");
+      return;
+    }
+    const unitPrice =
+      product.isScalable && product.pricePerUnit ? product.pricePerUnit : product.price;
+    const maxStock = product.trackInventory ? (product.stockQuantity ?? Infinity) : Infinity;
+    const maxQty = product.maxOrderQty ? Math.min(product.maxOrderQty, maxStock) : maxStock;
+
+    let added = false;
+    setCart((prev) => {
+      const existing = prev.find((i) => i.product.id === product.id && !i.variationId);
+      if (existing) {
+        const next = parseFloat((existing.quantity + rounded).toFixed(10));
+        if (next > maxQty) {
+          toast(`Only ${maxQty} ${unit} available for ${product.name}`, "error");
+          return prev;
+        }
+        added = true;
+        return prev.map((i) => (i === existing ? { ...i, quantity: next } : i));
+      }
+      if (rounded > maxQty) {
+        toast(`Only ${maxQty} ${unit} available for ${product.name}`, "error");
+        return prev;
+      }
+      added = true;
+      return [...prev, { product, quantity: rounded, unitPrice, discount: 0 }];
+    });
+    if (added) {
+      toast(`Added ${rounded} ${unit} of ${product.name} from the scale`, "success");
+      setWeighProduct(null);
+    }
+  };
+
   // Used by both the search-results dropdown and barcode scan: a product
   // with structured variations (or a legacy preset-only scalable product)
   // can't be added with a single click — which option/weight it is has to
@@ -1282,6 +1374,11 @@ export default function POSPage() {
       !hasVariations && !!product.isScalable && (product.scaleStep ?? 0.1) === 0;
     if (hasVariations || presetOnly) {
       setSearchPickerProduct(product);
+      setShowSearch(false);
+      return;
+    }
+    if (isWeighEligible(product) && scale.status === "connected") {
+      setWeighProduct(product);
       setShowSearch(false);
       return;
     }
@@ -1709,6 +1806,8 @@ export default function POSPage() {
               minute: "2-digit",
             })}
           </div>
+          {/* Checkout scale connect/status button */}
+          <ScalePanel />
           {/* Held transactions quick-access button */}
           <button
             onClick={() => {
@@ -1894,6 +1993,26 @@ export default function POSPage() {
               loading={gridLoading}
               onAddToCart={addToCart}
               cart={cart}
+              isScaleConnected={scale.status === "connected"}
+              isWeighEligible={isWeighEligible}
+              onWeighProduct={setWeighProduct}
+            />
+          )}
+
+          {/* Live weighing modal — put a loose item on the connected scale
+              and add exactly what it weighs, priced per the product's
+              pricePerUnit. Falls back to manual entry if the scale isn't
+              connected or the cashier prefers the old flow. */}
+          {weighProduct && (
+            <WeighModal
+              product={weighProduct}
+              onClose={() => setWeighProduct(null)}
+              onAdd={(_, weightKg) => addWeighedToCart(weighProduct, weightKg)}
+              onAddManually={() => {
+                const p = weighProduct;
+                setWeighProduct(null);
+                if (p) addToCart(p);
+              }}
             />
           )}
 
