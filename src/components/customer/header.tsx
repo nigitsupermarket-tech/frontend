@@ -25,9 +25,11 @@ import { useCartStore } from "@/store/cartStore";
 import { useWishlistStore } from "@/store/wishlistStore";
 import { useAuthStore } from "@/store/authStore";
 import { useSettings } from "@/hooks/useSettings";
+import { usePriceVisibility } from "@/hooks/usePriceVisibility";
 import { apiGet } from "@/lib/api";
 import { Category, Product } from "@/types";
 import Image from "next/image";
+import { PriceLock } from "@/components/customer/price-lock";
 
 function useDebounce<T>(value: T, delay: number): T {
   const [dv, setDv] = useState(value);
@@ -48,6 +50,7 @@ function SearchDropdown({
   const router = useRouter();
   const [results, setResults] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { pricesHidden } = usePriceVisibility();
 
   useEffect(() => {
     if (query.length < 3) {
@@ -117,7 +120,7 @@ function SearchDropdown({
                   </p>
                 </div>
                 <span className="text-sm font-bold text-brand-700 shrink-0">
-                  {formatPrice(product.price)}
+                  {pricesHidden ? <PriceLock compact /> : formatPrice(product.price)}
                 </span>
               </button>
             ))}

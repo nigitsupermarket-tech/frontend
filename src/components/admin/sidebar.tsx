@@ -64,6 +64,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
       { label: "POS Orders", href: "/admin/pos/orders" },
       // POS Sessions: ADMIN only — filtered in processedItems below
       { label: "POS Sessions", href: "/admin/pos/sessions" },
+      // Void Requests: ADMIN only — filtered in processedItems below
+      { label: "Void Requests", href: "/admin/pos/void-requests" },
     ],
   },
 
@@ -305,12 +307,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuthStore();
   const role = user?.role || "STAFF";
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingVoidCount, setPendingVoidCount] = useState(0);
 
   // Load pending stock approval count — Admin only now sees the queue at all.
   useEffect(() => {
     if (role !== "ADMIN") return;
     apiGet<any>("/stock-approvals/pending-count")
       .then((r) => setPendingCount(r.data?.count || 0))
+      .catch(() => {});
+  }, [role]);
+
+  // Load pending void-request count — Admin only.
+  useEffect(() => {
+    if (role !== "ADMIN") return;
+    apiGet<any>("/pos/void-requests/pending-count")
+      .then((r) => setPendingVoidCount(r.data?.count || 0))
       .catch(() => {});
   }, [role]);
 
@@ -339,6 +350,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "POS Sessions"),
+      };
+    }
+    // Void Requests: ADMIN only — everyone else requests void approval from
+    // an admin instead of seeing the review queue.
+    if (item.label === "Point of Sale" && role !== "ADMIN") {
+      return {
+        ...item,
+        children: item.children?.filter((c) => c.label !== "Void Requests"),
+      };
+    }
+    // Surface the pending count right in the label so it's visible without
+    // extra badge plumbing on child nav items.
+    if (item.label === "Point of Sale" && role === "ADMIN" && pendingVoidCount > 0) {
+      return {
+        ...item,
+        children: item.children?.map((c) =>
+          c.label === "Void Requests"
+            ? { ...c, label: `Void Requests (${pendingVoidCount > 99 ? "99+" : pendingVoidCount})` }
+            : c,
+        ),
       };
     }
     // Products: SALES cannot create new products — hide "Add Product"

@@ -11,8 +11,10 @@ import {
   Scale,
 } from "lucide-react";
 import { useCart } from "@/hooks/useCart";
+import { usePriceVisibility } from "@/hooks/usePriceVisibility";
 import { formatPrice, getProductImage } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/loading-spinner";
+import { PriceLock } from "@/components/customer/price-lock";
 import Image from "next/image";
 
 // ── Helpers (same pattern as cart-drawer) ─────────────────────────────────────
@@ -82,6 +84,7 @@ export default function CartPage() {
     isLoading,
     isGuest,
   } = useCart();
+  const { pricesHidden } = usePriceVisibility();
 
   if (items.length === 0) {
     return (
@@ -224,7 +227,11 @@ export default function CartPage() {
                   )}
 
                   {/* Price display */}
-                  {getVariationLabel(item) ? (
+                  {pricesHidden ? (
+                    <div className="mt-1">
+                      <PriceLock compact />
+                    </div>
+                  ) : getVariationLabel(item) ? (
                     <p className="mt-1 text-sm text-gray-500">
                       {formatPrice(item.price)}/pack
                     </p>
@@ -294,7 +301,7 @@ export default function CartPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatPrice(lineTotal)}
+                        {pricesHidden ? <PriceLock compact /> : formatPrice(lineTotal)}
                       </span>
                       <button
                         onClick={() => removeFromCart(itemId)}
@@ -338,7 +345,7 @@ export default function CartPage() {
                       )}
                     </span>
                     <span className="font-medium text-gray-900 shrink-0">
-                      {formatPrice(item.price * item.quantity)}
+                      {pricesHidden ? <PriceLock compact /> : formatPrice(item.price * item.quantity)}
                     </span>
                   </div>
                 );
@@ -352,7 +359,9 @@ export default function CartPage() {
               </div>
               <div className="border-t border-gray-100 pt-3 flex justify-between font-bold text-base">
                 <span>Subtotal</span>
-                <span className="text-brand-700">{formatPrice(subtotal)}</span>
+                <span className="text-brand-700">
+                  {pricesHidden ? <PriceLock /> : formatPrice(subtotal)}
+                </span>
               </div>
             </div>
             <Link

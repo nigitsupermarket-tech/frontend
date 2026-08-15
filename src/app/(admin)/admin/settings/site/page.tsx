@@ -435,6 +435,40 @@ export default function AdminSiteSettingsPage() {
               </p>
             </div>
           </label>
+
+          <div className="border-t border-gray-100 pt-4">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={settings.hidePricesUntilLogin ?? true}
+                  onChange={(e) => set("hidePricesUntilLogin", e.target.checked)}
+                  className="sr-only"
+                />
+                <div
+                  className={`w-11 h-6 rounded-full transition-colors ${
+                    settings.hidePricesUntilLogin ?? true ? "bg-brand-600" : "bg-gray-200"
+                  }`}
+                />
+                <div
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    settings.hidePricesUntilLogin ?? true ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </div>
+              <div>
+                <span className="text-sm font-medium text-gray-700">
+                  Hide prices until sign in / registration
+                </span>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Guests won't see prices anywhere on the store — product
+                  cards, the product page, cart, and search — until they
+                  create an account or log in. Prices show normally once
+                  signed in. On by default.
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
 
         {/* ── Maintenance ────────────────────────────────────────── */}

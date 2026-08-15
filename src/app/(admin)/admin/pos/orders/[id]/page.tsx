@@ -40,11 +40,15 @@ import {
   Download,
   XCircle,
   RefreshCcw,
+  ShieldAlert,
+  Clock,
+  CheckCircle2,
 } from "lucide-react";
-import { apiGet, apiPut, getApiError } from "@/lib/api";
+import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
 import { PageLoader, ErrorState } from "@/components/shared/loading-spinner";
 import { useToast } from "@/store/uiStore";
+import { useAuthStore } from "@/store/authStore";
 import {
   type POSOrder,
   printBothReceipts,
@@ -52,6 +56,14 @@ import {
 } from "@/lib/posReceipt";
 
 const FETCH_TIMEOUT_MS = 12_000;
+
+interface VoidRequestStatus {
+  id: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  reason: string;
+  reviewNote?: string;
+  reviewedByName?: string;
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -69,6 +81,8 @@ export default function POSOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
 
   const [order, setOrder] = useState<POSOrder | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -76,6 +90,8 @@ export default function POSOrderDetailPage() {
   const [printing, setPrinting] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
+  const [voidRequest, setVoidRequest] = useState<VoidRequestStatus | null>(null);
+  const [loadingVoidRequest, setLoadingVoidRequest] = useState(true);
 
   const loadOrder = async () => {
     setIsLoading(true);
@@ -116,8 +132,23 @@ export default function POSOrderDetailPage() {
     }
   };
 
+  const loadVoidRequestStatus = async () => {
+    setLoadingVoidRequest(true);
+    try {
+      const res = await apiGet<any>(`/pos/orders/${id}/void-request`);
+      setVoidRequest(res.data?.request || null);
+    } catch {
+      // Non-fatal — the void/request UI just falls back to its default state.
+    } finally {
+      setLoadingVoidRequest(false);
+    }
+  };
+
   useEffect(() => {
-    if (id) loadOrder();
+    if (id) {
+      loadOrder();
+      loadVoidRequestStatus();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -127,6 +158,7 @@ export default function POSOrderDetailPage() {
     printBothReceipts(order, () => setPrinting(false));
   };
 
+  // Admin — voids the order directly and immediately.
   const handleVoid = async () => {
     if (!order) return;
     if (!voidReason.trim()) {
@@ -139,6 +171,29 @@ export default function POSOrderDetailPage() {
       toast("Order voided and stock restored", "success");
       loadOrder();
       setVoidReason("");
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setVoiding(false);
+    }
+  };
+
+  // Non-admin — submits a request for an admin to approve instead of
+  // voiding directly.
+  const handleRequestVoid = async () => {
+    if (!order) return;
+    if (!voidReason.trim()) {
+      toast("Please enter a reason for the admin to review", "error");
+      return;
+    }
+    setVoiding(true);
+    try {
+      await apiPost(`/pos/orders/${order.id}/void-request`, {
+        reason: voidReason,
+      });
+      toast("Request sent — an admin needs to approve this void", "success");
+      setVoidReason("");
+      loadVoidRequestStatus();
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -289,33 +344,115 @@ export default function POSOrderDetailPage() {
           </div>
         </div>
 
-        {/* Void */}
-        {order.status === "COMPLETED" && (
-          <div className="border border-red-200 rounded-lg p-3 bg-red-50">
-            <p className="text-xs font-semibold text-red-700 mb-2">
-              Void this order (stock will be restored)
-            </p>
-            <input
-              type="text"
-              placeholder="Reason for voiding..."
-              value={voidReason}
-              onChange={(e) => setVoidReason(e.target.value)}
-              className="w-full border border-red-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-red-400 mb-2"
-            />
-            <button
-              type="button"
-              onClick={handleVoid}
-              disabled={voiding || !voidReason.trim()}
-              className="w-full py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {voiding ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  <XCircle className="w-4 h-4" /> Void Order
-                </>
-              )}
-            </button>
+        {/* Void — ADMIN sees a direct void form. Every other role sees a
+            "request approval" flow instead, with the current status of
+            their most recent request (if any). */}
+        {order.status === "COMPLETED" && !loadingVoidRequest && (
+          <>
+            {isAdmin ? (
+              <div className="border border-red-200 rounded-lg p-3 bg-red-50">
+                <p className="text-xs font-semibold text-red-700 mb-2">
+                  Void this order (stock will be restored)
+                </p>
+                <input
+                  type="text"
+                  placeholder="Reason for voiding..."
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  className="w-full border border-red-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-red-400 mb-2"
+                />
+                <button
+                  type="button"
+                  onClick={handleVoid}
+                  disabled={voiding || !voidReason.trim()}
+                  className="w-full py-2 bg-red-600 text-white text-sm font-semibold rounded hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {voiding ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4" /> Void Order
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : voidRequest?.status === "PENDING" ? (
+              <div className="border border-amber-200 rounded-lg p-3 bg-amber-50 flex items-start gap-2">
+                <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-semibold text-amber-800">
+                    Void request pending admin approval
+                  </p>
+                  <p className="text-amber-700 text-xs mt-0.5">
+                    You requested to void this order: &ldquo;{voidRequest.reason}
+                    &rdquo;. An admin needs to approve it before stock is
+                    restored and the order is voided.
+                  </p>
+                </div>
+              </div>
+            ) : voidRequest?.status === "REJECTED" ? (
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+                <div className="flex items-start gap-2">
+                  <XCircle className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-gray-700">
+                      Your last void request was rejected
+                    </p>
+                    {voidRequest.reviewNote && (
+                      <p className="text-gray-500 text-xs mt-0.5">
+                        Admin note: &ldquo;{voidRequest.reviewNote}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs font-semibold text-gray-600">
+                  You can submit a new request below.
+                </p>
+                <RequestVoidForm
+                  voidReason={voidReason}
+                  setVoidReason={setVoidReason}
+                  voiding={voiding}
+                  onSubmit={handleRequestVoid}
+                />
+              </div>
+            ) : (
+              <div className="border border-amber-200 rounded-lg p-3 bg-amber-50">
+                <p className="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  Only an admin can void an order
+                </p>
+                <p className="text-xs text-amber-700 mb-2">
+                  You don&apos;t have permission to void orders. Submit a
+                  request below and an admin will review it — stock is only
+                  restored once they approve.
+                </p>
+                <RequestVoidForm
+                  voidReason={voidReason}
+                  setVoidReason={setVoidReason}
+                  voiding={voiding}
+                  onSubmit={handleRequestVoid}
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        {/* An approved void request explains why a non-admin-facing order
+            now shows as VOIDED, even though they never had direct access. */}
+        {order.status === "VOIDED" && !isAdmin && voidRequest?.status === "APPROVED" && (
+          <div className="border border-green-200 rounded-lg p-3 bg-green-50 flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-green-800">
+                Your void request was approved
+              </p>
+              <p className="text-green-700 text-xs mt-0.5">
+                Approved by {voidRequest.reviewedByName || "an admin"}
+                {voidRequest.reviewNote && (
+                  <> — &ldquo;{voidRequest.reviewNote}&rdquo;</>
+                )}
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -348,3 +485,42 @@ export default function POSOrderDetailPage() {
     </div>
   );
 }
+
+function RequestVoidForm({
+  voidReason,
+  setVoidReason,
+  voiding,
+  onSubmit,
+}: {
+  voidReason: string;
+  setVoidReason: (v: string) => void;
+  voiding: boolean;
+  onSubmit: () => void;
+}) {
+  return (
+    <>
+      <input
+        type="text"
+        placeholder="Reason for the admin to review..."
+        value={voidReason}
+        onChange={(e) => setVoidReason(e.target.value)}
+        className="w-full border border-amber-200 px-3 py-2 text-sm rounded focus:outline-none focus:border-amber-400 mb-2"
+      />
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={voiding || !voidReason.trim()}
+        className="w-full py-2 bg-amber-600 text-white text-sm font-semibold rounded hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {voiding ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <>
+            <ShieldAlert className="w-4 h-4" /> Request Void Approval
+          </>
+        )}
+      </button>
+    </>
+  );
+}
+

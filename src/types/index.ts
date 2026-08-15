@@ -444,6 +444,9 @@ export interface SiteSettings {
 
   // Pricing visibility
   hidePricing?: boolean;
+  // Hide prices site-wide until the customer is logged in/registered.
+  // Defaults to true (hidden for guests) unless the admin turns it off.
+  hidePricesUntilLogin?: boolean;
 
   // ── Contact page ──────────────────────────────────────────────────────────
   contactTitle?: string;

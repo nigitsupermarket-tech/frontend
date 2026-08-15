@@ -19,11 +19,13 @@ import {
 import { useCart } from "@/hooks/useCart";
 import { useAuthStore } from "@/store/authStore";
 import { useCartStore } from "@/store/cartStore";
+import { usePriceVisibility } from "@/hooks/usePriceVisibility";
 import { formatPrice, getProductImage } from "@/lib/utils";
 import {
   LoadingSpinner,
   EmptyState,
 } from "@/components/shared/loading-spinner";
+import { PriceLock } from "@/components/customer/price-lock";
 import Image from "next/image";
 
 // ─── Auth required modal ──────────────────────────────────────────────────────
@@ -160,6 +162,7 @@ export function CartDrawer() {
     removeFromCart,
   } = useCart();
   const { isAuthenticated } = useAuthStore();
+  const { pricesHidden } = usePriceVisibility();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const handleCheckoutClick = () => {
@@ -336,7 +339,11 @@ export function CartDrawer() {
                       )}
 
                       {/* Scalable badge + unit price */}
-                      {getVariationLabel(item) ? (
+                      {pricesHidden ? (
+                        <div className="mt-1">
+                          <PriceLock compact />
+                        </div>
+                      ) : getVariationLabel(item) ? (
                         <p className="text-xs text-gray-500 mt-0.5">
                           {formatPrice(item.price)}/pack
                         </p>
@@ -400,7 +407,7 @@ export function CartDrawer() {
 
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-bold text-gray-900">
-                            {formatPrice(lineTotal)}
+                            {pricesHidden ? <PriceLock compact /> : formatPrice(lineTotal)}
                           </span>
                           <button
                             onClick={() => removeFromCart(itemId)}
@@ -428,7 +435,7 @@ export function CartDrawer() {
                 )
               </span>
               <span className="font-bold text-gray-900 text-base">
-                {formatPrice(subtotal)}
+                {pricesHidden ? <PriceLock compact /> : formatPrice(subtotal)}
               </span>
             </div>
             <p className="text-xs text-gray-400 -mt-2">
@@ -441,7 +448,7 @@ export function CartDrawer() {
                 onClick={closeCart}
                 className="w-full py-3.5 bg-brand-600 text-white text-sm font-semibold text-center rounded-xl hover:bg-brand-700 transition-colors flex items-center justify-center gap-2"
               >
-                Checkout — {formatPrice(subtotal)}
+                Checkout{pricesHidden ? "" : ` — ${formatPrice(subtotal)}`}
                 <ArrowRight className="w-4 h-4" />
               </Link>
             ) : (
@@ -449,7 +456,7 @@ export function CartDrawer() {
                 onClick={handleCheckoutClick}
                 className="w-full py-3.5 bg-brand-600 text-white text-sm font-semibold text-center rounded-xl hover:bg-brand-700 transition-colors flex items-center justify-center gap-2"
               >
-                Checkout — {formatPrice(subtotal)}
+                Checkout{pricesHidden ? "" : ` — ${formatPrice(subtotal)}`}
                 <ArrowRight className="w-4 h-4" />
               </button>
             )}

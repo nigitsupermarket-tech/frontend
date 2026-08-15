@@ -8,6 +8,8 @@ import { Star, Minus, Plus, ShoppingCart, Info, Scale } from "lucide-react";
 import { Product } from "@/types";
 import { cn, formatPrice, getProductImage } from "@/lib/utils";
 import { useCart } from "@/hooks/useCart";
+import { usePriceVisibility } from "@/hooks/usePriceVisibility";
+import { PriceLock } from "@/components/customer/price-lock";
 
 interface ProductCardProps {
   product: Product;
@@ -16,6 +18,7 @@ interface ProductCardProps {
 
 export function ProductCard({ product, className }: ProductCardProps) {
   const { addToCart, isLoading: cartLoading } = useCart();
+  const { pricesHidden } = usePriceVisibility();
   const [addedFeedback, setAddedFeedback] = useState(false);
   // Falls back to the placeholder if the stored image URL 404s/fails to
   // load (e.g. deleted from Cloudinary, or the optimizer can't reach it) —
@@ -246,13 +249,23 @@ export function ProductCard({ product, className }: ProductCardProps) {
             <span className="text-[10px] sm:text-xs leading-tight">
               {hasVariations ? (
                 <span className="font-semibold text-green-700">
-                  {selectedVariation ? formatPrice(selectedVariation.price) : ""} / {selectedVariation?.label}
+                  {pricesHidden ? (
+                    <PriceLock compact />
+                  ) : (
+                    <>
+                      {selectedVariation ? formatPrice(selectedVariation.price) : ""} / {selectedVariation?.label}
+                    </>
+                  )}
                 </span>
               ) : isScalable ? (
                 <span className="font-semibold text-green-700">
-                  {product.pricePerUnit
-                    ? `${formatPrice(product.pricePerUnit)}/${unit}`
-                    : `per ${unit}`}
+                  {pricesHidden ? (
+                    <PriceLock compact />
+                  ) : product.pricePerUnit ? (
+                    `${formatPrice(product.pricePerUnit)}/${unit}`
+                  ) : (
+                    `per ${unit}`
+                  )}
                 </span>
               ) : product.unitsPerCarton ? (
                 <>
@@ -449,24 +462,30 @@ export function ProductCard({ product, className }: ProductCardProps) {
 
           {/* Price */}
           <div className="flex items-baseline gap-1 flex-wrap">
-            <span className="text-xs sm:text-sm font-bold text-gray-900">
-              {formatPrice(effectivePrice)}
-            </span>
-            {hasVariations &&
-              selectedVariation?.compareAtPrice &&
-              selectedVariation.compareAtPrice > selectedVariation.price && (
-                <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
-                  {formatPrice(selectedVariation.compareAtPrice * packCount)}
+            {pricesHidden ? (
+              <PriceLock compact />
+            ) : (
+              <>
+                <span className="text-xs sm:text-sm font-bold text-gray-900">
+                  {formatPrice(effectivePrice)}
                 </span>
-              )}
-            {!hasVariations &&
-              !isScalable &&
-              product.comparePrice &&
-              product.comparePrice > product.price && (
-                <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
-                  {formatPrice(product.comparePrice)}
-                </span>
-              )}
+                {hasVariations &&
+                  selectedVariation?.compareAtPrice &&
+                  selectedVariation.compareAtPrice > selectedVariation.price && (
+                    <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
+                      {formatPrice(selectedVariation.compareAtPrice * packCount)}
+                    </span>
+                  )}
+                {!hasVariations &&
+                  !isScalable &&
+                  product.comparePrice &&
+                  product.comparePrice > product.price && (
+                    <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
+                      {formatPrice(product.comparePrice)}
+                    </span>
+                  )}
+              </>
+            )}
           </div>
 
           {/* CTA */}

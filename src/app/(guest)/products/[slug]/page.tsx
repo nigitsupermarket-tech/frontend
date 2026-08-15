@@ -23,6 +23,8 @@ import {
 import { useProduct } from "@/hooks/useProducts";
 import { useCart } from "@/hooks/useCart";
 import { useSettings } from "@/hooks/useSettings";
+import { usePriceVisibility } from "@/hooks/usePriceVisibility";
+import { PriceLock } from "@/components/customer/price-lock";
 import {
   formatPrice,
   calculateDiscountPercent,
@@ -162,6 +164,7 @@ export default function ProductDetailPage() {
   const { product, isLoading, error } = useProduct(slug);
   const { addToCart, isLoading: cartLoading } = useCart();
   const { settings } = useSettings();
+  const { pricesHidden } = usePriceVisibility();
 
   // ── DEBUG: log fetch state changes ────────────────────────────────────────
   console.log(
@@ -473,7 +476,11 @@ export default function ProductDetailPage() {
               </button>
             )}
 
-            {!settings.hidePricing && (
+            {settings.hidePricing ? null : pricesHidden ? (
+              <div className="mt-4">
+                <PriceLock />
+              </div>
+            ) : (
               <div className="flex items-center gap-3 mt-4">
                 {hasVariations && selectedVariation ? (
                   <>
@@ -656,7 +663,7 @@ export default function ProductDetailPage() {
                                 )}
                               </span>
                               <span className="text-sm font-bold text-brand-700">
-                                {formatPrice(v.price)}
+                                {pricesHidden ? <PriceLock compact /> : formatPrice(v.price)}
                               </span>
                               <span className="text-[10px] text-gray-400">
                                 {soldOut
@@ -705,7 +712,7 @@ export default function ProductDetailPage() {
                           </span>
                           <div className="text-right flex-1">
                             <p className="text-2xl font-bold text-brand-700">
-                              {formatPrice(variationPrice)}
+                              {pricesHidden ? <PriceLock /> : formatPrice(variationPrice)}
                             </p>
                           </div>
                         </div>
@@ -827,9 +834,9 @@ export default function ProductDetailPage() {
                         </span>
                         <div className="text-right flex-1">
                           <p className="text-2xl font-bold text-brand-700">
-                            {formatPrice(effectivePrice)}
+                            {pricesHidden ? <PriceLock /> : formatPrice(effectivePrice)}
                           </p>
-                          {product.pricePerUnit && (
+                          {!pricesHidden && product.pricePerUnit && (
                             <p className="text-xs text-gray-400">
                               {formatPrice(product.pricePerUnit)}/{unit}
                             </p>
@@ -840,9 +847,9 @@ export default function ProductDetailPage() {
                     {presetOnly && (
                       <div className="text-right">
                         <p className="text-2xl font-bold text-brand-700">
-                          {formatPrice(effectivePrice)}
+                          {pricesHidden ? <PriceLock /> : formatPrice(effectivePrice)}
                         </p>
-                        {product.pricePerUnit && (
+                        {!pricesHidden && product.pricePerUnit && (
                           <p className="text-xs text-gray-400">
                             {formatPrice(product.pricePerUnit)}/{unit}
                           </p>
