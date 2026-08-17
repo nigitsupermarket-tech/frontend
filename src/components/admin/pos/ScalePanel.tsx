@@ -79,10 +79,9 @@ export default function ScalePanel() {
                 <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
                   <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>
-                    This browser doesn&apos;t support the Web Serial API. Open the POS
-                    in desktop Chrome or Edge on the till PC that&apos;s physically
-                    connected to the scale (via its RS232 port, through a
-                    USB-to-serial cable).
+                    {scale.settings.transport === "network"
+                      ? "This browser doesn't support WebSocket, which the local scale agent needs. Try a different browser."
+                      : "This browser doesn't support the Web Serial API. Use desktop Chrome or Edge, or switch to the local network agent below."}
                   </span>
                 </div>
               )}
@@ -225,96 +224,127 @@ function ScaleSettingsForm({
       {expanded && (
         <div className="px-3 pb-3 space-y-3">
           <p className="text-[10px] text-gray-400 leading-snug">
-            Defaults (9600 baud, 8 data bits, no parity, 1 stop bit) match most
-            RS232 checkout scales. Change these only if the live weight above
-            reads garbled or never updates.
+            &quot;Local network agent&quot; is the default and right choice for the
+            CECON scale wired through the DHNET Ethernet box — see
+            scale-agent/README.md. &quot;Direct USB serial&quot; only applies if a
+            USB-to-RS232 cable runs straight from the scale into this PC.
           </p>
 
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-[10px] font-semibold text-gray-500">
-              Baud rate
-              <select
-                value={settings.baudRate}
-                onChange={(e) => onChange({ baudRate: Number(e.target.value) })}
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                {[1200, 2400, 4800, 9600, 19200, 38400, 57600].map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="text-[10px] font-semibold text-gray-500 block">
+            Connection type
+            <select
+              value={settings.transport}
+              onChange={(e) =>
+                onChange({ transport: e.target.value as ScaleSerialSettings["transport"] })
+              }
+              className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+            >
+              <option value="network">Local network agent (recommended)</option>
+              <option value="serial">Direct USB serial cable</option>
+            </select>
+          </label>
 
-            <label className="text-[10px] font-semibold text-gray-500">
-              Line ending
-              <select
-                value={settings.lineEnding}
-                onChange={(e) =>
-                  onChange({ lineEnding: e.target.value as ScaleSerialSettings["lineEnding"] })
-                }
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                <option value="crlf">CR + LF</option>
-                <option value="cr">CR only</option>
-                <option value="lf">LF only</option>
-              </select>
+          {settings.transport === "network" ? (
+            <label className="text-[10px] font-semibold text-gray-500 block">
+              Agent address
+              <input
+                value={settings.agentUrl}
+                onChange={(e) => onChange({ agentUrl: e.target.value })}
+                placeholder="ws://localhost:4100"
+                className="mt-1 w-full text-xs font-mono border border-gray-200 rounded px-2 py-1.5"
+              />
+              <span className="text-[9px] text-gray-400 mt-1 block">
+                Must be the scale-agent running on <b>this</b> till PC — always
+                localhost, never the scale&apos;s own IP.
+              </span>
             </label>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[10px] font-semibold text-gray-500">
+                Baud rate
+                <select
+                  value={settings.baudRate}
+                  onChange={(e) => onChange({ baudRate: Number(e.target.value) })}
+                  className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+                >
+                  {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <label className="text-[10px] font-semibold text-gray-500">
-              Data bits
-              <select
-                value={settings.dataBits}
-                onChange={(e) => onChange({ dataBits: Number(e.target.value) as 7 | 8 })}
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                <option value={8}>8</option>
-                <option value={7}>7</option>
-              </select>
-            </label>
+              <label className="text-[10px] font-semibold text-gray-500">
+                Data bits
+                <select
+                  value={settings.dataBits}
+                  onChange={(e) => onChange({ dataBits: Number(e.target.value) as 7 | 8 })}
+                  className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+                >
+                  <option value={8}>8</option>
+                  <option value={7}>7</option>
+                </select>
+              </label>
 
-            <label className="text-[10px] font-semibold text-gray-500">
-              Parity
-              <select
-                value={settings.parity}
-                onChange={(e) =>
-                  onChange({ parity: e.target.value as ScaleSerialSettings["parity"] })
-                }
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                <option value="none">None</option>
-                <option value="even">Even</option>
-                <option value="odd">Odd</option>
-              </select>
-            </label>
+              <label className="text-[10px] font-semibold text-gray-500">
+                Parity
+                <select
+                  value={settings.parity}
+                  onChange={(e) =>
+                    onChange({ parity: e.target.value as ScaleSerialSettings["parity"] })
+                  }
+                  className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+                >
+                  <option value="none">None</option>
+                  <option value="even">Even</option>
+                  <option value="odd">Odd</option>
+                </select>
+              </label>
 
-            <label className="text-[10px] font-semibold text-gray-500">
-              Stop bits
-              <select
-                value={settings.stopBits}
-                onChange={(e) => onChange({ stopBits: Number(e.target.value) as 1 | 2 })}
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-              </select>
-            </label>
+              <label className="text-[10px] font-semibold text-gray-500">
+                Stop bits
+                <select
+                  value={settings.stopBits}
+                  onChange={(e) => onChange({ stopBits: Number(e.target.value) as 1 | 2 })}
+                  className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                </select>
+              </label>
+            </div>
+          )}
 
-            <label className="text-[10px] font-semibold text-gray-500">
-              Weight unit on wire
-              <select
-                value={settings.wireUnit}
-                onChange={(e) =>
-                  onChange({ wireUnit: e.target.value as ScaleSerialSettings["wireUnit"] })
-                }
-                className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
-              >
-                <option value="kg">kg</option>
-                <option value="g">g</option>
-                <option value="lb">lb</option>
-              </select>
-            </label>
-          </div>
+          <label className="text-[10px] font-semibold text-gray-500 block">
+            Line ending
+            <select
+              value={settings.lineEnding}
+              onChange={(e) =>
+                onChange({ lineEnding: e.target.value as ScaleSerialSettings["lineEnding"] })
+              }
+              className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+            >
+              <option value="crlf">CR + LF</option>
+              <option value="cr">CR only</option>
+              <option value="lf">LF only</option>
+            </select>
+          </label>
+
+          <label className="text-[10px] font-semibold text-gray-500 block">
+            Weight unit on wire
+            <select
+              value={settings.wireUnit}
+              onChange={(e) =>
+                onChange({ wireUnit: e.target.value as ScaleSerialSettings["wireUnit"] })
+              }
+              className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1.5"
+            >
+              <option value="kg">kg</option>
+              <option value="g">g</option>
+              <option value="lb">lb</option>
+            </select>
+          </label>
 
           <div>
             <label className="text-[10px] font-semibold text-gray-500 flex items-center justify-between">

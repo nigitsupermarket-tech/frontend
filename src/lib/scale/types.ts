@@ -14,7 +14,16 @@
 
 export type ParityOption = "none" | "even" | "odd";
 
+export type ScaleTransport = "serial" | "network";
+
 export interface ScaleSerialSettings {
+  transport: ScaleTransport;
+  // Local scale-agent WebSocket URL — used when transport === "network".
+  // The agent runs on the same till PC as the browser (see scale-agent/),
+  // relaying the DHNET box's TCP stream to this localhost socket, since a
+  // browser can't reach the DHNET box on the LAN directly (mixed content)
+  // and a serverless backend can't reach it at all (private network).
+  agentUrl: string;
   baudRate: number;
   dataBits: 7 | 8;
   stopBits: 1 | 2;
@@ -47,6 +56,8 @@ export interface ScaleSerialSettings {
 }
 
 export const DEFAULT_SCALE_SETTINGS: ScaleSerialSettings = {
+  transport: "network",
+  agentUrl: "ws://localhost:4100",
   baudRate: 9600,
   dataBits: 8,
   stopBits: 1,

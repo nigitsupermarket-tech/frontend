@@ -57,12 +57,11 @@ export interface LiveScaleApi extends LiveScaleState {
 }
 
 export function useLiveScale(): LiveScaleApi {
-  const supported =
+  const serialSupported =
     typeof window !== "undefined" && !!(window.navigator as Navigator).serial;
+  const networkSupported = typeof window !== "undefined" && "WebSocket" in window;
 
-  const [status, setStatus] = useState<ScaleConnectionStatus>(
-    supported ? "idle" : "unsupported",
-  );
+  const [status, setStatus] = useState<ScaleConnectionStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
   const [weightKg, setWeightKg] = useState<number | null>(null);
@@ -70,9 +69,18 @@ export function useLiveScale(): LiveScaleApi {
   const [rawLog, setRawLog] = useState<string[]>([]);
   const [settings, setSettings] = useState<ScaleSerialSettings>(DEFAULT_SCALE_SETTINGS);
 
+  const supported = settings.transport === "serial" ? serialSupported : networkSupported;
+
+  // Serial transport refs
   const portRef = useRef<SerialPort | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const keepReadingRef = useRef(false);
+
+  // Network transport refs (agent WebSocket)
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsShouldReconnectRef = useRef(false);
+
+  const bufferRef = useRef("");
   const samplesRef = useRef<Sample[]>([]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -110,6 +118,28 @@ export function useLiveScale(): LiveScaleApi {
     return spanning && withinTolerance;
   }, []);
 
+  // Shared by both transports: accumulate raw text, split into complete
+  // lines per the configured line ending, and parse each one. Whether the
+  // bytes arrived via a serial reader or a WebSocket message from the
+  // local agent makes no difference from this point on.
+  const handleIncomingText = useCallback(
+    (text: string) => {
+      bufferRef.current += text;
+      const { lines, rest } = splitLines(bufferRef.current, settingsRef.current.lineEnding);
+      bufferRef.current = rest;
+      for (const line of lines) {
+        pushRaw(line);
+        const parsed = parseScaleLine(line, settingsRef.current);
+        if (parsed.weightKg !== null) {
+          setWeightKg(parsed.weightKg);
+          setIsStable(evaluateStability(parsed.weightKg, parsed.reportedStable));
+        }
+      }
+    },
+    [evaluateStability, pushRaw],
+  );
+
+  // ── Serial transport ─────────────────────────────────────────────────
   const readLoop = useCallback(
     async (port: SerialPort) => {
       const readable = port.readable;
@@ -117,24 +147,13 @@ export function useLiveScale(): LiveScaleApi {
       const reader = readable.getReader();
       readerRef.current = reader;
       const decoder = new TextDecoder();
-      let buffer = "";
 
       try {
         while (keepReadingRef.current) {
           const { value, done } = await reader.read();
           if (done) break;
           if (!value) continue;
-          buffer += decoder.decode(value, { stream: true });
-          const { lines, rest } = splitLines(buffer, settingsRef.current.lineEnding);
-          buffer = rest;
-          for (const line of lines) {
-            pushRaw(line);
-            const parsed = parseScaleLine(line, settingsRef.current);
-            if (parsed.weightKg !== null) {
-              setWeightKg(parsed.weightKg);
-              setIsStable(evaluateStability(parsed.weightKg, parsed.reportedStable));
-            }
-          }
+          handleIncomingText(decoder.decode(value, { stream: true }));
         }
       } catch (err) {
         if (keepReadingRef.current) {
@@ -147,34 +166,10 @@ export function useLiveScale(): LiveScaleApi {
         reader.releaseLock();
       }
     },
-    [evaluateStability, pushRaw],
+    [handleIncomingText],
   );
 
-  const disconnect = useCallback(async () => {
-    keepReadingRef.current = false;
-    try {
-      await readerRef.current?.cancel();
-    } catch {
-      /* ignore */
-    }
-    readerRef.current = null;
-    try {
-      await portRef.current?.close();
-    } catch {
-      /* ignore */
-    }
-    portRef.current = null;
-    setStatus(supported ? "idle" : "unsupported");
-    setWeightKg(null);
-    setIsStable(false);
-    setDeviceLabel(null);
-    samplesRef.current = [];
-  }, [supported]);
-
-  const connect = useCallback(async () => {
-    if (!supported) return;
-    setErrorMessage(null);
-    setStatus("connecting");
+  const connectSerial = useCallback(async () => {
     try {
       const port = await window.navigator.serial!.requestPort();
       await port.open({
@@ -191,14 +186,12 @@ export function useLiveScale(): LiveScaleApi {
           : "Serial device",
       );
       port.addEventListener("disconnect", () => {
-        disconnect();
+        disconnectRef.current();
       });
       keepReadingRef.current = true;
       setStatus("connected");
       readLoop(port);
     } catch (err) {
-      // User cancelled the picker — not really an "error" state, just go
-      // back to idle quietly.
       if (err instanceof Error && err.name === "NotFoundError") {
         setStatus("idle");
         return;
@@ -206,12 +199,106 @@ export function useLiveScale(): LiveScaleApi {
       setErrorMessage(err instanceof Error ? err.message : "Could not open the scale");
       setStatus("error");
     }
-  }, [disconnect, readLoop, supported]);
+  }, [readLoop]);
+
+  // ── Network transport (local scale-agent) ────────────────────────────
+  const connectNetwork = useCallback(() => {
+    wsShouldReconnectRef.current = true;
+    setDeviceLabel(settingsRef.current.agentUrl);
+
+    const ws = new WebSocket(settingsRef.current.agentUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setStatus("connected");
+      setErrorMessage(null);
+    };
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "data" && typeof msg.text === "string") {
+          handleIncomingText(msg.text);
+        } else if (msg.type === "status" && msg.status === "disconnected") {
+          // The agent lost its connection to the scale bridge (DHNET box)
+          // even though the agent itself is still reachable — surface
+          // that distinction rather than silently showing stale weight.
+          setErrorMessage("Agent is running but can't reach the scale bridge.");
+        }
+      } catch {
+        // Not JSON — ignore rather than crash the connection.
+      }
+    };
+    ws.onerror = () => {
+      setErrorMessage(
+        `Couldn't reach the scale agent at ${settingsRef.current.agentUrl}. Is it running on this till?`,
+      );
+      setStatus("error");
+    };
+    ws.onclose = () => {
+      wsRef.current = null;
+      if (wsShouldReconnectRef.current) {
+        setStatus(networkSupported ? "idle" : "unsupported");
+      }
+    };
+  }, [handleIncomingText, networkSupported]);
+
+  // ── Shared connect/disconnect ────────────────────────────────────────
+  const disconnect = useCallback(async () => {
+    keepReadingRef.current = false;
+    wsShouldReconnectRef.current = false;
+    try {
+      await readerRef.current?.cancel();
+    } catch {
+      /* ignore */
+    }
+    readerRef.current = null;
+    try {
+      await portRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    portRef.current = null;
+    try {
+      wsRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    wsRef.current = null;
+
+    setStatus(supported ? "idle" : "unsupported");
+    setWeightKg(null);
+    setIsStable(false);
+    setDeviceLabel(null);
+    setErrorMessage(null);
+    samplesRef.current = [];
+    bufferRef.current = "";
+  }, [supported]);
+
+  // readLoop's serial "disconnect" hardware event needs to call the latest
+  // disconnect() without creating a circular hook dependency.
+  const disconnectRef = useRef(disconnect);
+  disconnectRef.current = disconnect;
+
+  const connect = useCallback(async () => {
+    if (!supported) return;
+    setErrorMessage(null);
+    setStatus("connecting");
+    if (settingsRef.current.transport === "network") {
+      connectNetwork();
+    } else {
+      await connectSerial();
+    }
+  }, [connectNetwork, connectSerial, supported]);
 
   const tare = useCallback(async () => {
-    const port = portRef.current;
     const cmd = settingsRef.current.tareCommand;
-    if (!port || !port.writable || !cmd) return;
+    if (!cmd) return;
+    if (settingsRef.current.transport === "network") {
+      wsRef.current?.send(JSON.stringify({ type: "send", text: cmd }));
+      return;
+    }
+    const port = portRef.current;
+    if (!port || !port.writable) return;
     const writer = port.writable.getWriter();
     try {
       await writer.write(new TextEncoder().encode(cmd));
@@ -235,8 +322,10 @@ export function useLiveScale(): LiveScaleApi {
   useEffect(() => {
     return () => {
       keepReadingRef.current = false;
+      wsShouldReconnectRef.current = false;
       readerRef.current?.cancel().catch(() => {});
       portRef.current?.close().catch(() => {});
+      wsRef.current?.close();
     };
   }, []);
 
