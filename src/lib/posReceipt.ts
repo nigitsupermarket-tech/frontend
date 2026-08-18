@@ -18,6 +18,7 @@ import {
   downloadReceiptPdf,
   wrapText,
   money as pdfMoney,
+  estimateHeightMm,
 } from "./receiptPdf";
 
 export interface POSOrderItem {
@@ -83,15 +84,34 @@ export function buildReceiptHtml(
     })
     .join("");
 
+  // The @page height must be a real fixed number (not "auto" — see the
+  // note below), but it also can't be a flat constant: an order with a
+  // dozen+ items, like a real busy receipt, needs far more room than a
+  // short one does, or the tail end gets cut off entirely. Reuse the exact
+  // same line-by-line height estimate already used for the PDF download
+  // path (buildReceiptPdfLines + estimateHeightMm), so both outputs size
+  // the page the same way from one shared source of truth. A little extra
+  // padding accounts for this being an HTML/CSS layout rather than the
+  // PDF's own font-metrics-based line boxes — the two aren't pixel
+  // identical, and it's much safer to run slightly long than to cut off
+  // real content.
+  const heightMm = Math.max(
+    120,
+    estimateHeightMm(buildReceiptPdfLines(order, copyLabel)) + 15,
+  );
+
+
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <style>
-      /* size: 80mm 297mm — NOT "80mm auto". See printOnlineInvoice.ts for
-         the full explanation: "auto" height can hang Chrome's print-preview
-         pagination on fixed-page destinations like Print to PDF, even
-         though it works fine on a real thermal printer's roll-paper
-         driver. A generously tall fixed height works on both. */
-      @page { size: 80mm 297mm; margin: 2mm 0; }
+      /* size: 80mm ${heightMm}mm — NOT "80mm auto". See printOnlineInvoice.ts
+         for the full explanation: "auto" height can hang Chrome's
+         print-preview pagination on fixed-page destinations like Print to
+         PDF, even though it works fine on a real thermal printer's
+         roll-paper driver. A fixed height works on both — it just has to
+         be computed per-receipt (above) rather than one constant, or a
+         long order gets cut off. */
+      @page { size: 80mm ${heightMm}mm; margin: 2mm 0; }
       * { 
         box-sizing: border-box; 
         margin: 0; 

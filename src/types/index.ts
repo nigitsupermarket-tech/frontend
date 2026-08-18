@@ -148,6 +148,7 @@ export interface Product {
   minOrderQty?: number; // e.g. 0.1
   maxOrderQty?: number; // e.g. 10
   scaleStep?: number; // e.g. 0.1
+  scaleWareCode?: string; // scale's own 7-digit item code (barcode recognition)
   scalePresets?: number[]; // LEGACY — bare quantity presets, superseded by `variations`
   variations?: ProductVariation[]; // structured, labeled, individually-priced presets
 

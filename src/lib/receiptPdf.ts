@@ -81,6 +81,7 @@ function estimateHeightMm(lines: ReceiptLine[]): number {
   }
   return Math.max(60, h);
 }
+export { estimateHeightMm };
 
 let fontRegistered = false;
 function ensureFont(doc: jsPDF) {

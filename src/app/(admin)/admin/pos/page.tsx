@@ -76,6 +76,7 @@ interface Product {
   maxOrderQty?: number;
   scaleStep?: number;
   scalePresets?: number[];
+  scaleWareCode?: string;
   variations?: ProductVariation[];
 }
 interface CartItem {
@@ -1106,8 +1107,26 @@ function POSPageInner() {
     return () => clearTimeout(t);
   }, [searchQuery, handleSearch]);
 
+  // A CECON scale-printed label barcode: 18 digits, [0:7]=scale ware code,
+  // [7:12]=weight in grams. See resolveScaleBarcode on the backend for the
+  // full field-layout notes (confirmed against real printed labels).
+  const SCALE_BARCODE_PATTERN = /^\d{18}$/;
+
   const handleBarcode = async (code: string) => {
     if (!code.trim()) return;
+
+    if (SCALE_BARCODE_PATTERN.test(code)) {
+      try {
+        const res = await apiGet<any>(`/pos/scale-barcode/${code}`);
+        const { product, weightKg } = res.data;
+        addWeighedToCart(product, weightKg);
+        if (barcodeRef.current) barcodeRef.current.value = "";
+      } catch (err) {
+        toast(getApiError(err), "error");
+      }
+      return;
+    }
+
     try {
       const res = await apiGet<any>(
         `/products?barcode=${encodeURIComponent(code)}&status=ACTIVE&limit=1`,

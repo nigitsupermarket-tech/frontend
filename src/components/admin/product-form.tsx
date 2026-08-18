@@ -254,6 +254,8 @@ const emptyForm = {
   maxOrderQty: "",          // optional max (e.g. 10 kg)
   scaleStep: "0.1",         // increment step in POS / online store
   scalePresets: "",         // comma-separated quick-select values e.g. "0.5,1,2,3"
+  scaleWareCode: "",        // the CECON scale's own 7-digit item code, for
+                             // recognizing its printed barcode at checkout
 };
 
 export default function ProductForm({ productId, onSave }: Props) {
@@ -371,6 +373,7 @@ export default function ProductForm({ productId, onSave }: Props) {
             maxOrderQty: String(p.maxOrderQty || ""),
             scaleStep: String(p.scaleStep ?? "0.1"),
             scalePresets: (p.scalePresets || []).join(", "),
+            scaleWareCode: p.scaleWareCode || "",
           });
 
           const loadedVariations = (p.variations || [])
@@ -766,6 +769,7 @@ export default function ProductForm({ productId, onSave }: Props) {
           minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
           maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
           scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
+          scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
           variations: variationsPayload,
         };
         await apiPut(`/products/${productId}`, payloadNoStock);
@@ -859,6 +863,7 @@ export default function ProductForm({ productId, onSave }: Props) {
         minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
         maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
         scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
+        scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
         scalePresets: form.isScalable && form.scalePresets
           ? form.scalePresets.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v))
           : [],
@@ -1249,6 +1254,17 @@ export default function ProductForm({ productId, onSave }: Props) {
                     }
                   />
                 </div>
+
+                {/* CECON scale ware code — links this product to a barcode
+                    the physical scale prints, so scanning it at checkout
+                    recognizes the item and its weight automatically. */}
+                <Input
+                  label="Scale Ware Code (optional)"
+                  value={form.scaleWareCode}
+                  onChange={(v) => setField("scaleWareCode", v)}
+                  placeholder="e.g. 0000004"
+                  hint="The scale's own 7-digit item code — visible on any label it prints for this product, or in mscale's Merchandise → Code column. Leave blank if this product isn't weighed on the checkout scale."
+                />
 
                 {/* ── Preset-only mode notice ── */}
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800 space-y-1">
