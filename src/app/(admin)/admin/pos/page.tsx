@@ -1003,8 +1003,52 @@ function POSPageInner() {
 
   // ── Camera barcode scanner state ──────────────────────────────────────────
   const [showCameraScanner, setShowCameraScanner] = useState(false);
+  // Drives the "Scanner ready" indicator next to the barcode box — purely
+  // visual, so the cashier can see at a glance whether pulling the trigger
+  // will actually land in this field right now.
+  const [scannerFocused, setScannerFocused] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerControlsRef = useRef<{ stop: () => void } | null>(null);
+
+  // Keep the barcode-scan box focused whenever nothing else legitimately
+  // needs the cursor. A USB scanner gun (the handheld kind, as opposed to
+  // the camera scanner) behaves exactly like very fast keyboard typing
+  // into whatever's currently focused, followed by Enter — this is what
+  // lets the cashier just pull the trigger with zero clicking, as long as
+  // this box already has focus when they do. Deliberately scoped to "cart
+  // is empty" rather than always-on, so it doesn't fight a cashier who's
+  // actively typing into the product search box or a modal.
+  useEffect(() => {
+    const modalOpen =
+      !!searchPickerProduct ||
+      !!weighProduct ||
+      showPayment ||
+      showReceipt ||
+      showSuspendPanel ||
+      showSuspendDialog ||
+      showDiscountPanel ||
+      showCloseSession ||
+      showCameraScanner ||
+      showSearch;
+
+    if (!session || modalOpen) return;
+    if (cart.length === 0) {
+      barcodeRef.current?.focus();
+    }
+  }, [
+    cart.length,
+    session,
+    searchPickerProduct,
+    weighProduct,
+    showPayment,
+    showReceipt,
+    showSuspendPanel,
+    showSuspendDialog,
+    showDiscountPanel,
+    showCloseSession,
+    showCameraScanner,
+    showSearch,
+  ]);
 
   // ✅ FIX 3: Load products + categories when grid mode is activated
   useEffect(() => {
@@ -1112,6 +1156,17 @@ function POSPageInner() {
   // full field-layout notes (confirmed against real printed labels).
   const SCALE_BARCODE_PATTERN = /^\d{18}$/;
 
+  // Clears the scan box and puts the cursor straight back in it — a USB
+  // scanner gun types into whatever's focused, so keeping focus here after
+  // every scan (success or failure) is what lets the cashier just keep
+  // pulling the trigger without touching the screen at all.
+  const resetBarcodeInput = () => {
+    if (barcodeRef.current) {
+      barcodeRef.current.value = "";
+      barcodeRef.current.focus();
+    }
+  };
+
   const handleBarcode = async (code: string) => {
     if (!code.trim()) return;
 
@@ -1120,9 +1175,10 @@ function POSPageInner() {
         const res = await apiGet<any>(`/pos/scale-barcode/${code}`);
         const { product, weightKg } = res.data;
         addWeighedToCart(product, weightKg);
-        if (barcodeRef.current) barcodeRef.current.value = "";
       } catch (err) {
         toast(getApiError(err), "error");
+      } finally {
+        resetBarcodeInput();
       }
       return;
     }
@@ -1142,10 +1198,11 @@ function POSPageInner() {
             ? undefined
             : (product.variations || []).find((v: ProductVariation) => v.barcode === code);
         addOrPickVariation(product, matchedVariation);
-        if (barcodeRef.current) barcodeRef.current.value = "";
       } else toast(`No product for barcode: ${code}`, "error");
     } catch {
       toast("Barcode lookup failed", "error");
+    } finally {
+      resetBarcodeInput();
     }
   };
 
@@ -1903,12 +1960,22 @@ function POSPageInner() {
                     )}
                   </div>
                   <div className="relative">
-                    <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Barcode
+                      className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors ${
+                        scannerFocused ? "text-amber-500" : "text-gray-400"
+                      }`}
+                    />
                     <input
                       ref={barcodeRef}
                       type="text"
                       placeholder="Scan barcode"
-                      className="pl-9 pr-4 py-2.5 border border-gray-300 text-sm focus:outline-none focus:border-amber-500 rounded bg-white w-40"
+                      onFocus={() => setScannerFocused(true)}
+                      onBlur={() => setScannerFocused(false)}
+                      className={`pl-9 pr-4 py-2.5 border text-sm focus:outline-none rounded bg-white w-40 transition-shadow ${
+                        scannerFocused
+                          ? "border-amber-500 ring-2 ring-amber-200"
+                          : "border-gray-300 focus:border-amber-500"
+                      }`}
                       onKeyDown={(e) => {
                         if (e.key === "Enter")
                           handleBarcode(e.currentTarget.value);
@@ -1924,6 +1991,27 @@ function POSPageInner() {
                     <Camera className="w-4 h-4" />
                     <span className="hidden sm:inline">Camera</span>
                   </button>
+                </div>
+
+                {/* Scanner-gun readiness indicator. A USB scanner gun just
+                    "types" into whatever text field is focused, so this is
+                    the cashier's only visual cue that pulling the trigger
+                    right now will land a scan in the box above. In normal
+                    flow (not floated over anything) so it can't collide
+                    with the search-results dropdown right below it. */}
+                <div
+                  className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-medium transition-colors ${
+                    scannerFocused ? "text-green-700" : "text-gray-400"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      scannerFocused ? "bg-green-500 animate-pulse" : "bg-gray-300"
+                    }`}
+                  />
+                  {scannerFocused
+                    ? "Scanner ready — pull the trigger on any barcode"
+                    : "Click the barcode box, or a USB scanner gun will type into it automatically"}
                 </div>
 
                 {/* Search results dropdown */}
