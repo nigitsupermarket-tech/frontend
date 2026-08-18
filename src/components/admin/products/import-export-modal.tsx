@@ -189,14 +189,21 @@ export function ImportExportModal({
     }
   };
 
-  const handleDownloadTemplate = () => {
-    const a = document.createElement("a");
-    a.href = "/product-import-template.csv";
-    a.download = "product-import-template.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    toast("Template downloaded", "success");
+  const handleDownloadTemplate = async () => {
+    try {
+      // Pulled live from the backend's PRODUCT_CSV_COLUMNS (same source of
+      // truth the CSV export uses) rather than a static file — so the
+      // template can never silently drift out of sync with what export
+      // actually produces or import actually expects.
+      await downloadBlob(
+        `${API_URL}/export/products/template`,
+        "product-import-template.csv",
+        token,
+      );
+      toast("Template downloaded", "success");
+    } catch (error) {
+      toast(getApiError(error), "error");
+    }
   };
 
   // ── Import with progress ────────────────────────────────────────────────────
