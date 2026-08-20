@@ -701,12 +701,28 @@ function POSProductGrid({
                 !hasVariations &&
                 !!product.isScalable &&
                 (product.scaleStep ?? 0.1) === 0;
+              // Legacy quick-select weights (a plain comma-separated list on
+              // the product itself, not a structured variation) — set from
+              // the "Preset Weights" field on the product's Scale/Weight
+              // tab. These deserve the same picker treatment as
+              // variations/presetOnly: without this, a product with
+              // presets configured just went straight into being weighed
+              // or added at a default quantity, and the presets only ever
+              // surfaced as small buttons tacked onto the cart line
+              // afterward — easy to miss entirely, which is exactly what
+              // was reported ("I set preset values but can't see the
+              // option to select").
+              const hasLegacyPresets =
+                !hasVariations &&
+                !presetOnly &&
+                !!product.isScalable &&
+                (product.scalePresets?.length ?? 0) > 0;
               return (
                 <button
                   key={product.id}
                   onClick={() => {
                     if (outOfStock) return;
-                    if (hasVariations || presetOnly) {
+                    if (hasVariations || presetOnly || hasLegacyPresets) {
                       setPickerProduct(product);
                     } else if (isScaleConnected && isWeighEligible(product)) {
                       onWeighProduct(product);
@@ -894,6 +910,25 @@ function POSProductGrid({
                 ))}
               </div>
             )}
+            {/* Presets here are a convenience shortcut, not a hard lock —
+                unlike true preset-only (scaleStep = 0) products, this one
+                still has a real step, so offer a way to weigh a custom
+                amount instead of one of the quick presets. */}
+            {(pickerProduct.scaleStep ?? 0.1) !== 0 &&
+              (pickerProduct.variations || []).filter((v) => v.isActive)
+                .length === 0 &&
+              isScaleConnected &&
+              isWeighEligible(pickerProduct) && (
+                <button
+                  onClick={() => {
+                    setPickerProduct(null);
+                    onWeighProduct(pickerProduct);
+                  }}
+                  className="mt-3 w-full py-2 text-sm font-medium text-green-700 border border-dashed border-green-300 rounded-lg hover:bg-green-50 transition-colors"
+                >
+                  Weigh a custom amount instead
+                </button>
+              )}
             <button
               onClick={() => setPickerProduct(null)}
               className="mt-4 w-full py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
@@ -1474,7 +1509,16 @@ function POSPageInner() {
       !hasVariations &&
       !!product.isScalable &&
       (product.scaleStep ?? 0.1) === 0;
-    if (hasVariations || presetOnly) {
+    // See the matching comment in the product-grid onClick handler above —
+    // legacy scalePresets get the same picker treatment here too, so a
+    // barcode scan or search-result tap for a preset-configured product
+    // offers the presets immediately instead of silently skipping them.
+    const hasLegacyPresets =
+      !hasVariations &&
+      !presetOnly &&
+      !!product.isScalable &&
+      (product.scalePresets?.length ?? 0) > 0;
+    if (hasVariations || presetOnly || hasLegacyPresets) {
       setSearchPickerProduct(product);
       setShowSearch(false);
       return;
@@ -2255,6 +2299,24 @@ function POSPageInner() {
                     ))}
                   </div>
                 )}
+                {/* Same escape hatch as the grid picker — see the matching
+                    comment there. */}
+                {(searchPickerProduct.scaleStep ?? 0.1) !== 0 &&
+                  (searchPickerProduct.variations || []).filter(
+                    (v) => v.isActive,
+                  ).length === 0 &&
+                  scale.status === "connected" &&
+                  isWeighEligible(searchPickerProduct) && (
+                    <button
+                      onClick={() => {
+                        setSearchPickerProduct(null);
+                        setWeighProduct(searchPickerProduct);
+                      }}
+                      className="mt-3 w-full py-2 text-sm font-medium text-green-700 border border-dashed border-green-300 rounded-lg hover:bg-green-50 transition-colors"
+                    >
+                      Weigh a custom amount instead
+                    </button>
+                  )}
                 <button
                   onClick={() => setSearchPickerProduct(null)}
                   className="mt-4 w-full py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
