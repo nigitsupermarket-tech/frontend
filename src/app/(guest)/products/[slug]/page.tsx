@@ -29,6 +29,7 @@ import {
   formatPrice,
   calculateDiscountPercent,
   getProductImage,
+  formatScaleQty,
 } from "@/lib/utils";
 import { PageLoader, ErrorState } from "@/components/shared/loading-spinner";
 import { ProductReviews } from "@/components/shared/product-reviews";
@@ -312,8 +313,7 @@ export default function ProductDetailPage() {
       ? product.pricePerUnit * scaleQty
       : product.price;
 
-  const scaleDisplay = (v: number) =>
-    v % 1 === 0 ? `${v.toFixed(0)} ${unit}` : `${v.toFixed(1)} ${unit}`;
+  const scaleDisplay = (v: number) => `${formatScaleQty(v, step)} ${unit}`;
 
   const discount = product.comparePrice
     ? calculateDiscountPercent(product.comparePrice, product.price)

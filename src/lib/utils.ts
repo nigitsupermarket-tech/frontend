@@ -20,6 +20,36 @@ export function formatPrice(amount: number): string {
   return `₦${amount.toLocaleString("en-NG")}`;
 }
 
+// ─── Scale/weight quantity formatting ────────────────────────────────────────
+// Every quantity picker in the app was previously formatted with a flat
+// `.toFixed(1)` or `.toFixed(2)` regardless of the product's own
+// scaleStep — so a product configured with a fine step like 0.005 (kg)
+// would round its displayed quantity to the nearest 0.1 or 0.01, even
+// though the actual quantity sold (and the price charged for it, which
+// is computed off the real, unrounded value) was more precise than the
+// number shown. e.g. a 0.075kg sale would render as "0.1 kg" on the POS
+// cart line while the price correctly reflected 0.075kg — same number,
+// two different displayed precisions for the same sale.
+//
+// This derives the decimal places to show FROM the step itself (0.005 →
+// 3 decimals, 0.1 → 1 decimal, 1 → 0 decimals), so the display always has
+// enough precision to actually distinguish two different quantities a
+// step apart, and trims trailing zeros so a whole-number quantity still
+// reads as "2 kg" rather than "2.000 kg".
+export function scaleQtyDecimals(step?: number | null): number {
+  if (!step || step <= 0) return 2; // no step available — reasonable default
+  const s = step.toString();
+  const dotIdx = s.indexOf(".");
+  const decimals = dotIdx === -1 ? 0 : s.length - dotIdx - 1;
+  return Math.min(decimals, 4); // sane ceiling — a scale isn't THAT precise
+}
+
+export function formatScaleQty(qty: number, step?: number | null): string {
+  if (qty % 1 === 0) return qty.toFixed(0);
+  const decimals = scaleQtyDecimals(step);
+  return qty.toFixed(decimals).replace(/\.?0+$/, "");
+}
+
 // ─── Abbreviated currency (for dashboard/stat cards where full figures
 // would overflow or look cluttered, e.g. ₦8,481,585 → ₦8.48M) ───────────────
 // Keeps 2 sig-figs after the decimal for readability, drops trailing ".00".

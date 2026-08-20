@@ -28,7 +28,7 @@ import { useCartStore } from "@/store/cartStore";
 import { useAuthStore } from "@/store/authStore";
 import { useToast } from "@/store/uiStore";
 import { apiPost, apiGet, getApiError } from "@/lib/api";
-import { formatPrice, getProductImage } from "@/lib/utils";
+import { formatPrice, getProductImage, formatScaleQty } from "@/lib/utils";
 import { nigeriaStatesLgas } from "@/data/nigeria-states-lgas";
 import Image from "next/image";
 import Link from "next/link";
@@ -121,9 +121,8 @@ function itemMaxQty(item: any): number {
   const max = item.product?.maxOrderQty ?? item.maxOrderQty;
   return max ? Math.min(max, stock) : stock;
 }
-function fmtQty(qty: number, unit?: string): string {
-  const s =
-    qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
+function fmtQty(qty: number, unit?: string, step?: number): string {
+  const s = formatScaleQty(qty, step);
   return unit ? `${s} ${unit}` : s;
 }
 // Set when this line is a specific structured variation/preset (e.g. "500g
@@ -274,7 +273,7 @@ function CartSummaryAdjuster() {
             </div>
             {presetOnly ? (
               <span className="text-center text-xs font-semibold w-16 px-1 py-1 border border-gray-200 rounded bg-gray-50">
-                {fmtQty(item.quantity, unit)}
+                {fmtQty(item.quantity, unit, step)}
               </span>
             ) : (
               <div className="flex items-center border border-gray-200 rounded bg-white overflow-hidden">
@@ -290,7 +289,7 @@ function CartSummaryAdjuster() {
                 >
                   {isVariation
                     ? `×${item.quantity}`
-                    : fmtQty(item.quantity, unit)}
+                    : fmtQty(item.quantity, unit, step)}
                 </span>
                 <button
                   onClick={handleInc}
@@ -1154,6 +1153,7 @@ export default function CheckoutPageContent() {
                   {items.map((item: any) => {
                     const scalable = isItemScalable(item);
                     const unit = itemUnit(item);
+                    const scaleStepVal = itemStep(item);
                     return (
                       <div
                         key={item.id}
@@ -1180,7 +1180,7 @@ export default function CheckoutPageContent() {
                           ) : scalable && unit ? (
                             <p className="text-xs text-green-700 flex items-center gap-1">
                               <Scale className="w-3 h-3" />
-                              {fmtQty(item.quantity, unit)} ×{" "}
+                              {fmtQty(item.quantity, unit, scaleStepVal)} ×{" "}
                               {formatPrice(item.price)}/{unit}
                             </p>
                           ) : (

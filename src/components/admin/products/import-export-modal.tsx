@@ -363,6 +363,13 @@ export function ImportExportModal({
   };
 
   // ── Import with progress ────────────────────────────────────────────────────
+  // CSV keeps its exact original flow below (read as text, run the
+  // client-side validateCSV pre-check, then upload) — nothing about that
+  // path changed. Excel (.xlsx/.xls) is a binary format validateCSV can't
+  // parse as text, so it skips straight to upload instead, the same way
+  // the scale-sheet importer already does — the backend's parseImportFile
+  // handles the real validation either way, and the results screen below
+  // renders identically regardless of which format was actually uploaded.
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -375,9 +382,12 @@ export function ImportExportModal({
     // ── Stage 1: Read file ──────────────────────────────────────────────────
     setProgress({ stage: "reading", percent: 10, message: "Reading file…" });
 
-    if (!file.name.endsWith(".csv")) {
+    const lowerName = file.name.toLowerCase();
+    const isCsv = lowerName.endsWith(".csv");
+    const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
+    if (!isCsv && !isExcel) {
       toast(
-        "Only .csv files are supported. Please use the template provided.",
+        "Only .csv, .xlsx, or .xls files are supported. Please use the template provided.",
         "error",
       );
       setProgress({ stage: "error", percent: 0, message: "Invalid file type" });
@@ -385,59 +395,64 @@ export function ImportExportModal({
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast("File is too large. Maximum size is 5MB.", "error");
+    if (file.size > 20 * 1024 * 1024) {
+      toast("File is too large. Maximum size is 20MB.", "error");
       setProgress({ stage: "error", percent: 0, message: "File too large" });
       resetInput();
       return;
     }
 
-    let csvContent = "";
-    try {
-      csvContent = await file.text();
-    } catch {
-      toast("Could not read the file. Make sure it's a valid CSV.", "error");
-      setProgress({ stage: "error", percent: 0, message: "File read failed" });
-      resetInput();
-      return;
+    if (isCsv) {
+      let csvContent = "";
+      try {
+        csvContent = await file.text();
+      } catch {
+        toast("Could not read the file. Make sure it's a valid CSV.", "error");
+        setProgress({ stage: "error", percent: 0, message: "File read failed" });
+        resetInput();
+        return;
+      }
+
+      // ── Stage 2: Validate client-side (CSV only) ───────────────────────────
+      setProgress({
+        stage: "validating",
+        percent: 25,
+        message: "Validating CSV structure…",
+      });
+      await new Promise((r) => setTimeout(r, 150)); // let UI update
+
+      const validation = validateCSV(csvContent);
+      setPreValidation({
+        errors: validation.errors,
+        rowCount: validation.rowCount,
+      });
+
+      if (!validation.valid) {
+        toast(validation.errors[0], "error");
+        setProgress({ stage: "error", percent: 0, message: "Validation failed" });
+        resetInput();
+        return;
+      }
+
+      if (validation.rowCount === 0) {
+        toast("No data rows found in the CSV.", "error");
+        setProgress({ stage: "error", percent: 0, message: "Empty file" });
+        resetInput();
+        return;
+      }
+
+      setProgress({
+        stage: "uploading",
+        percent: 40,
+        message: `Uploading ${validation.rowCount} rows…`,
+      });
+    } else {
+      // Excel — no row count to report yet, the server parses it.
+      setProgress({ stage: "uploading", percent: 40, message: "Uploading…" });
     }
-
-    // ── Stage 2: Validate client-side ──────────────────────────────────────
-    setProgress({
-      stage: "validating",
-      percent: 25,
-      message: "Validating CSV structure…",
-    });
-    await new Promise((r) => setTimeout(r, 150)); // let UI update
-
-    const validation = validateCSV(csvContent);
-    setPreValidation({
-      errors: validation.errors,
-      rowCount: validation.rowCount,
-    });
-
-    if (!validation.valid) {
-      toast(validation.errors[0], "error");
-      setProgress({ stage: "error", percent: 0, message: "Validation failed" });
-      resetInput();
-      return;
-    }
-
-    if (validation.rowCount === 0) {
-      toast("No data rows found in the CSV.", "error");
-      setProgress({ stage: "error", percent: 0, message: "Empty file" });
-      resetInput();
-      return;
-    }
-
-    // ── Stage 3: Upload ─────────────────────────────────────────────────────
-    setProgress({
-      stage: "uploading",
-      percent: 40,
-      message: `Uploading ${validation.rowCount} rows…`,
-    });
     await new Promise((r) => setTimeout(r, 100));
 
+    // ── Stage 3: Upload ─────────────────────────────────────────────────────
     let response: Response;
     try {
       const formData = new FormData();
@@ -811,10 +826,11 @@ export function ImportExportModal({
           {/* ── IMPORT TAB ── */}
           {activeTab === "import" && (
             <>
-              {/* Import type selector — admin only, since both paths that
-                  create brand-new products (CSV-create and the scale sheet)
-                  are admin-gated on the backend */}
-              {isAdmin && !isImporting && progress?.stage !== "done" && (
+              {/* Import type selector — visible to anyone who can create
+                  products via CSV (ADMIN/MANAGER/STAFF). The scale-sheet
+                  path itself uses the exact same permission tier now (see
+                  importScaleGoodsSheet), so this is a single check. */}
+              {canCreateProducts && !isImporting && progress?.stage !== "done" && (
                 <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
                   <button
                     onClick={() => {
@@ -838,7 +854,7 @@ export function ImportExportModal({
               )}
 
               {/* ── CECON SCALE SHEET IMPORT ── */}
-              {importSource === "scale" && isAdmin ? (
+              {importSource === "scale" && canCreateProducts ? (
                 <>
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex gap-2 text-xs text-blue-700">
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -1172,18 +1188,18 @@ export function ImportExportModal({
                   {!isImporting && progress?.stage !== "done" && (
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-2">
-                        Upload CSV File
+                        Upload CSV or Excel File
                       </label>
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".csv"
+                        accept=".csv,.xlsx,.xls"
                         onChange={handleFileChange}
                         disabled={isImporting}
                         className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand-50 file:text-brand-700 file:font-medium file:text-xs hover:file:bg-brand-100 disabled:opacity-50"
                       />
                       <p className="text-xs text-gray-400 mt-1">
-                        Max 5MB · CSV format only · Columns must match the
+                        Max 20MB · .csv, .xlsx, or .xls · Columns must match the
                         template
                       </p>
                     </div>

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useCart } from "@/hooks/useCart";
 import { usePriceVisibility } from "@/hooks/usePriceVisibility";
-import { formatPrice, getProductImage } from "@/lib/utils";
+import { formatPrice, getProductImage, formatScaleQty } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/loading-spinner";
 import { PriceLock } from "@/components/customer/price-lock";
 import Image from "next/image";
@@ -44,9 +44,8 @@ function getMaxQty(item: any): number {
 function isPresetOnly(item: any): boolean {
   return getIsScalable(item) && getStep(item) === 0;
 }
-function fmtQty(qty: number, unit?: string): string {
-  const s =
-    qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
+function fmtQty(qty: number, unit?: string, step?: number): string {
+  const s = formatScaleQty(qty, step);
   return unit ? `${s} ${unit}` : s;
 }
 // Set when this line is a specific structured variation/preset (e.g. "500g
@@ -250,7 +249,7 @@ export default function CartPage() {
                     <div className="flex flex-col gap-0.5">
                       {presetOnly ? (
                         <span className="text-center font-semibold text-sm border border-gray-200 rounded-xl px-3 py-2 bg-gray-50">
-                          {fmtQty(item.quantity, unit)}
+                          {fmtQty(item.quantity, unit, step)}
                         </span>
                       ) : (
                         <div className="flex items-center gap-1 border border-gray-200 rounded-xl px-1">
@@ -266,7 +265,7 @@ export default function CartPage() {
                           >
                             {isVariationLine
                               ? `×${item.quantity}`
-                              : fmtQty(item.quantity, unit)}
+                              : fmtQty(item.quantity, unit, step)}
                           </span>
                           <button
                             onClick={handleIncrement}
@@ -286,14 +285,14 @@ export default function CartPage() {
                           {atMax && (
                             <p className="text-xs text-orange-500 font-medium leading-tight text-center">
                               {isScalable
-                                ? `Max: ${fmtQty(maxQty, unit)}`
+                                ? `Max: ${fmtQty(maxQty, unit, step)}`
                                 : `Max available stock (${maxQty}) reached`}
                             </p>
                           )}
                           {isScalable && (
                             <p className="text-[10px] text-gray-400 text-center">
-                              Step: {fmtQty(step, unit)} · Min:{" "}
-                              {fmtQty(minQty, unit)}
+                              Step: {fmtQty(step, unit, step)} · Min:{" "}
+                              {fmtQty(minQty, unit, step)}
                             </p>
                           )}
                         </>
@@ -326,6 +325,7 @@ export default function CartPage() {
               {items.map((item: any) => {
                 const isScalable = getIsScalable(item);
                 const unit = getUnit(item);
+                const step = getStep(item);
                 return (
                   <div
                     key={item.id ?? item.productId}
@@ -335,7 +335,7 @@ export default function CartPage() {
                       {item.product?.name ?? item.name}
                       {isScalable && unit && (
                         <span className="text-green-600 ml-1">
-                          ({fmtQty(item.quantity, unit)})
+                          ({fmtQty(item.quantity, unit, step)})
                         </span>
                       )}
                       {!isScalable && (

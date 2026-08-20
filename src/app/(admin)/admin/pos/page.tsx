@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, formatScaleQty, getProductImage } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
 import ScalePanel from "@/components/admin/pos/ScalePanel";
@@ -462,9 +462,7 @@ function CartItemRow({
   const qtyDisplay = isVariationLine
     ? `×${item.quantity}`
     : isScalable
-      ? item.quantity % 1 === 0
-        ? `${item.quantity.toFixed(0)} ${unit}`
-        : `${item.quantity.toFixed(1)} ${unit}`
+      ? `${formatScaleQty(item.quantity, step)} ${unit}`
       : String(item.quantity);
 
   const lineTotal = item.unitPrice * item.quantity * (1 - item.discount / 100);
@@ -727,18 +725,12 @@ function POSProductGrid({
                 >
                   {/* Product image */}
                   <div className="aspect-square w-full bg-gray-100 overflow-hidden">
-                    {product.images?.[0] ? (
-                      <img
-                        src={product.images[0]}
-                        alt={product.name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Package className="w-8 h-8 text-gray-300" />
-                      </div>
-                    )}
+                    <img
+                      src={getProductImage(product.images)}
+                      alt={product.name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
                   </div>
 
                   {/* Cart quantity badge */}
@@ -747,7 +739,7 @@ function POSProductGrid({
                       {hasVariations
                         ? `×${inCartQty}`
                         : product.isScalable
-                          ? `${inCartQty % 1 === 0 ? inCartQty.toFixed(0) : inCartQty.toFixed(1)}${product.scaleUnit ? product.scaleUnit[0] : ""}`
+                          ? `${formatScaleQty(inCartQty, product.scaleStep)}${product.scaleUnit ? product.scaleUnit[0] : ""}`
                           : inCartQty}
                     </span>
                   )}
@@ -2066,13 +2058,11 @@ function POSPageInner() {
                         className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-green-50 text-left border-b border-gray-100 last:border-0"
                       >
                         <div className="w-8 h-8 bg-gray-100 rounded flex-shrink-0 overflow-hidden">
-                          {product.images?.[0] && (
-                            <img
-                              src={product.images[0]}
-                              alt=""
-                              className="w-full h-full object-contain"
-                            />
-                          )}
+                          <img
+                            src={getProductImage(product.images)}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">
@@ -2733,9 +2723,7 @@ function POSPageInner() {
                   const isScalableItem = !!item.product.isScalable;
                   const itemUnit = item.product.scaleUnit || "unit";
                   const qtyLabel = isScalableItem
-                    ? item.quantity % 1 === 0
-                      ? `${item.quantity.toFixed(0)} ${itemUnit}`
-                      : `${item.quantity.toFixed(1)} ${itemUnit}`
+                    ? `${formatScaleQty(item.quantity, item.product.scaleStep)} ${itemUnit}`
                     : String(item.quantity);
                   const priceLabel = isScalableItem
                     ? `${formatPrice(item.unitPrice)}/${itemUnit}`

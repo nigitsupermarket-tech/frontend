@@ -20,7 +20,7 @@ import { useCart } from "@/hooks/useCart";
 import { useAuthStore } from "@/store/authStore";
 import { useCartStore } from "@/store/cartStore";
 import { usePriceVisibility } from "@/hooks/usePriceVisibility";
-import { formatPrice, getProductImage } from "@/lib/utils";
+import { formatPrice, getProductImage, formatScaleQty } from "@/lib/utils";
 import {
   LoadingSpinner,
   EmptyState,
@@ -120,9 +120,8 @@ function getMaxQty(item: any): number {
   return stockQty;
 }
 
-function formatQty(qty: number, unit?: string): string {
-  const rounded =
-    qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2).replace(/\.?0+$/, "");
+function formatQty(qty: number, unit?: string, step?: number): string {
+  const rounded = formatScaleQty(qty, step);
   return unit ? `${rounded} ${unit}` : rounded;
 }
 
@@ -363,7 +362,7 @@ export function CartDrawer() {
                         <div className="flex flex-col gap-0.5">
                           {presetOnly ? (
                             <span className="text-center text-sm font-semibold text-gray-900 select-none border border-gray-200 rounded-xl px-3 py-1.5 bg-gray-50">
-                              {formatQty(item.quantity, unit)}
+                              {formatQty(item.quantity, unit, step)}
                             </span>
                           ) : (
                             <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -379,7 +378,7 @@ export function CartDrawer() {
                               >
                                 {isVariationLine
                                   ? `×${item.quantity}`
-                                  : formatQty(item.quantity, unit)}
+                                  : formatQty(item.quantity, unit, step)}
                               </span>
                               <button
                                 onClick={handleIncrement}
@@ -398,7 +397,7 @@ export function CartDrawer() {
                             atMax && (
                               <p className="text-[10px] text-orange-500 font-medium leading-tight text-center">
                                 {isScalable
-                                  ? `Max: ${formatQty(maxQty, unit)}`
+                                  ? `Max: ${formatQty(maxQty, unit, step)}`
                                   : `Max stock (${maxQty}) reached`}
                               </p>
                             )

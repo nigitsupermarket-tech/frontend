@@ -477,8 +477,7 @@ export default function AdminProductsPage() {
                               : "bg-red-100 text-red-600"
                         }`}
                       >
-                        {PRODUCT_STATUS_LABELS[product.status] ||
-                          product.status}
+                        {PRODUCT_STATUS_LABELS[product.status] || product.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600 font-medium">

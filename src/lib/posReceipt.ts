@@ -20,6 +20,19 @@ import {
   money as pdfMoney,
   estimateHeightMm,
 } from "./receiptPdf";
+import { formatScaleQty } from "./utils";
+
+// POSOrderItem (below) doesn't carry the product's scaleStep — it's a
+// snapshot of a completed sale, not live product config, and scaleStep
+// was never persisted per line item. Rather than fall back to
+// formatScaleQty's generic 2-decimal default here (which would still
+// under-represent a fine step like 0.005, the same bug this is fixing
+// elsewhere — see formatScaleQty in lib/utils.ts), force 3-decimal
+// precision explicitly so a printed receipt never shows a rounder
+// quantity than what the price was actually calculated from. A fully
+// precise fix would snapshot the real scaleStep onto POSOrderItem at
+// sale time — a schema change, out of scope here.
+const RECEIPT_QTY_STEP = 0.001;
 
 export interface POSOrderItem {
   id: string;
@@ -64,7 +77,7 @@ export function buildReceiptHtml(
       const qtyLabel = item.variationLabel
         ? `${item.quantity}× pack`
         : item.scaleUnit
-          ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
+          ? `${formatScaleQty(item.quantity, RECEIPT_QTY_STEP)} ${item.scaleUnit}`
           : String(item.quantity);
       const priceLabel = item.variationLabel
         ? `&#8358;${item.unitPrice.toLocaleString()}/pack`
@@ -204,7 +217,7 @@ function buildReceiptPdfLines(
     const qtyLabel = item.variationLabel
       ? `${item.quantity}x pack`
       : item.scaleUnit
-        ? `${item.quantity % 1 === 0 ? item.quantity.toFixed(0) : item.quantity.toFixed(2)} ${item.scaleUnit}`
+        ? `${formatScaleQty(item.quantity, RECEIPT_QTY_STEP)} ${item.scaleUnit}`
         : String(item.quantity);
     const priceLabel = item.variationLabel
       ? `${pdfMoney(item.unitPrice)}/pack`

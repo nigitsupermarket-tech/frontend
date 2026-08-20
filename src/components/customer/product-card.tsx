@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star, Minus, Plus, ShoppingCart, Info, Scale } from "lucide-react";
 import { Product } from "@/types";
-import { cn, formatPrice, getProductImage } from "@/lib/utils";
+import { cn, formatPrice, getProductImage, formatScaleQty } from "@/lib/utils";
 import { useCart } from "@/hooks/useCart";
 import { usePriceVisibility } from "@/hooks/usePriceVisibility";
 import { PriceLock } from "@/components/customer/price-lock";
@@ -169,7 +169,7 @@ export function ProductCard({ product, className }: ProductCardProps) {
     presetOnly && quantity <= 0
       ? "Select"
       : isScalable
-        ? `${quantity % 1 === 0 ? quantity.toFixed(0) : quantity.toFixed(1)} ${unit}`
+        ? `${formatScaleQty(quantity, step)} ${unit}`
         : String(quantity);
 
   const atMin = presetOnly
