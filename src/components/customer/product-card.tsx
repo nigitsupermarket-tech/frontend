@@ -62,9 +62,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
   // customer must tap one of the preset weights below.
   const presetOnly = isScalable && step === 0;
   const minQty = product.minOrderQty || (presetOnly ? 0 : step);
-  const maxQty =
-    product.maxOrderQty ||
-    (product.trackInventory ? product.stockQuantity : 9999);
+  // Never offer more than what's actually in stock, even if maxOrderQty
+  // is higher — see the same fix in products/[slug]/page.tsx.
+  const maxQty = product.trackInventory
+    ? Math.min(product.maxOrderQty || Infinity, product.stockQuantity)
+    : product.maxOrderQty || 9999;
   const presets = product.scalePresets?.length ? product.scalePresets : [];
 
   // For scalable: quantity is a float (kg, L, etc.). For fixed: integer.

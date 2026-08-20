@@ -263,9 +263,13 @@ export default function ProductDetailPage() {
   // Preset-only mode: no +/- increment or typed amount — must tap a preset.
   const presetOnly = isScalable && step === 0;
   const minQty = product.minOrderQty || (presetOnly ? 0 : step);
-  const maxQtyScale =
-    product.maxOrderQty ||
-    (product.trackInventory ? product.stockQuantity : 9999);
+  // Never offer more than what's actually in stock, even if maxOrderQty
+  // (a business-policy cap set by the admin) is higher — otherwise a
+  // customer can select a quantity here that gets rejected at checkout
+  // once the server re-checks real stock. The smaller of the two wins.
+  const maxQtyScale = product.trackInventory
+    ? Math.min(product.maxOrderQty || Infinity, product.stockQuantity)
+    : product.maxOrderQty || 9999;
   const presets = product.scalePresets?.length ? product.scalePresets : [];
   const hasScaleSelection = !presetOnly || scaleQty > 0;
 

@@ -448,7 +448,10 @@ export default function AdminProductsPage() {
                       <span
                         className={`px-2 py-0.5 rounded-full text-xs font-medium ${stockColors[product.stockStatus] || "bg-gray-100 text-gray-500"}`}
                       >
-                        {product.stockQuantity} units
+                        {product.stockQuantity}{" "}
+                        {product.isScalable
+                          ? product.scaleUnit || "unit"
+                          : "units"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -621,7 +624,10 @@ export default function AdminProductsPage() {
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Current: {quickStock.product.stockQuantity} units
+                Current: {quickStock.product.stockQuantity}{" "}
+                {quickStock.product.isScalable
+                  ? quickStock.product.scaleUnit || "unit"
+                  : "units"}
               </p>
             </div>
             <div>

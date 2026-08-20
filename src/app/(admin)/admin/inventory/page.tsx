@@ -26,6 +26,12 @@ interface InventoryItem {
   // the rest of the product is fine.
   variationId?: string;
   variationLabel?: string;
+  // What the stockQuantity number actually counts: the product's
+  // scaleUnit (e.g. "kg") for a scalable product's shared pool, always
+  // "pack(s)" for a variation row, or null for an ordinary fixed-count
+  // product — where the number is just whole units and needs no label.
+  unit?: string | null;
+  isScalable?: boolean;
 }
 
 // A product can appear twice (once for its shared pool, once per low/out
@@ -271,6 +277,11 @@ export default function AdminInventoryPage() {
                             className={`font-semibold ${item.stockQuantity === 0 ? "text-red-600" : item.stockQuantity <= item.lowStockThreshold ? "text-orange-600" : "text-gray-900"}`}
                           >
                             {item.stockQuantity}
+                            {item.unit && (
+                              <span className="ml-1 text-xs font-normal text-gray-400">
+                                {item.unit}
+                              </span>
+                            )}
                           </span>
                         )}
                       </td>
