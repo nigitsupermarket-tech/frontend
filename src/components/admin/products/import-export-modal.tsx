@@ -212,12 +212,18 @@ export function ImportExportModal({
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [scaleCategoryId, setScaleCategoryId] = useState("");
   // Every row this importer creates is marked as a scalable/weighed
-  // product (see backend importScaleGoodsSheet) — these two just control
-  // what unit and step it's scalable BY, same fields the "Add Product"
-  // form's Scale/Weight tab exposes.
+  // product (see backend importScaleGoodsSheet) — these fields control
+  // what unit/step/order-limits/presets it's scalable BY, same fields the
+  // "Add Product" form's Scale/Weight tab exposes. All optional except
+  // unit and step, which the backend always needs some value for.
   const [scaleUnit, setScaleUnit] = useState("kg");
   const [scaleUnitCustom, setScaleUnitCustom] = useState("");
-  const [scaleStep, setScaleStep] = useState("0.1");
+  // Default matches the CECON scale's own precision (down to the gram) —
+  // 0.1 was silently coarser than what most goods on a real sheet need.
+  const [scaleStep, setScaleStep] = useState("0.001");
+  const [scaleMinOrderQty, setScaleMinOrderQty] = useState("");
+  const [scaleMaxOrderQty, setScaleMaxOrderQty] = useState("");
+  const [scalePresets, setScalePresets] = useState("");
 
   // ── Recent imports + undo ───────────────────────────────────────────────
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
@@ -631,7 +637,10 @@ export function ImportExportModal({
         "scaleUnit",
         scaleUnit === "custom" ? scaleUnitCustom.trim() : scaleUnit,
       );
-      formData.append("scaleStep", scaleStep || "0.1");
+      formData.append("scaleStep", scaleStep || "0.001");
+      if (scaleMinOrderQty) formData.append("minOrderQty", scaleMinOrderQty);
+      if (scaleMaxOrderQty) formData.append("maxOrderQty", scaleMaxOrderQty);
+      if (scalePresets) formData.append("scalePresets", scalePresets);
 
       response = await new Promise<Response>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -929,7 +938,7 @@ export function ImportExportModal({
                           <input
                             type="number"
                             min={0}
-                            step="0.01"
+                            step="0.001"
                             value={scaleStep}
                             onChange={(e) => setScaleStep(e.target.value)}
                             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
@@ -950,6 +959,70 @@ export function ImportExportModal({
                           />
                         </div>
                       )}
+
+                      {/* Optional — none of these have a column in a CECON
+                          sheet, so there's nothing per-row to read; set once
+                          here and it applies to every product this import
+                          creates. All blank by default, matching how these
+                          products behaved before this was added. */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                            Min order{" "}
+                            <span className="text-gray-400 font-normal">
+                              (optional)
+                            </span>
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.001"
+                            placeholder={`defaults to step (${scaleStep || "0.001"})`}
+                            value={scaleMinOrderQty}
+                            onChange={(e) => setScaleMinOrderQty(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                            Max order{" "}
+                            <span className="text-gray-400 font-normal">
+                              (optional)
+                            </span>
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.001"
+                            placeholder="no limit"
+                            value={scaleMaxOrderQty}
+                            onChange={(e) => setScaleMaxOrderQty(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                          Default presets{" "}
+                          <span className="text-gray-400 font-normal">
+                            (optional)
+                          </span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 0.25, 0.5, 1, 2"
+                          value={scalePresets}
+                          onChange={(e) => setScalePresets(e.target.value)}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                        />
+                        <p className="text-xs text-gray-400 mt-1">
+                          Comma-separated quick-select weights, applied to every
+                          product from this sheet — e.g. tappable "0.5 kg" / "1
+                          kg" shortcuts at POS and on the storefront, instead of
+                          only the +/- stepper. Leave blank for none.
+                        </p>
+                      </div>
+
                       <p className="text-xs text-gray-400 -mt-2">
                         Every product from this sheet is created as scalable,
                         with{" "}

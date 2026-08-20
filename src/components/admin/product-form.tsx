@@ -653,6 +653,127 @@ export default function ProductForm({ productId, onSave }: Props) {
 
     setSaving(true);
     try {
+      // Every field EXCEPT stockQuantity and variations — shared by both
+      // the admin and non-admin save paths below, so a field added here
+      // can never again silently apply to one role's save and not the
+      // other's (see the comment at the non-admin branch for the bug this
+      // replaced). stockQuantity and variations differ by role — see each
+      // branch below for why.
+      const buildCommonFields = () => {
+        const images = form.media
+          .filter((m) => m.type === "image")
+          .map((m) => m.url);
+        const nutritionalInfo: any = {};
+        Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
+          if (v) nutritionalInfo[k] = parseFloat(v as string);
+        });
+        return {
+          name: form.name,
+          slug: form.slug || generateSlug(form.name),
+          description: form.description,
+          shortDescription: form.shortDescription,
+          price: parseFloat(form.price),
+          comparePrice: form.comparePrice
+            ? parseFloat(form.comparePrice)
+            : undefined,
+          costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
+          sku: form.sku,
+          barcode: form.barcode || undefined,
+          categoryId: form.categoryId,
+          brandId: form.brandId || undefined,
+          tags: form.tags
+            ? form.tags
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean)
+            : [],
+          images,
+          lowStockThreshold: Number(form.lowStockThreshold),
+          allowBackorder: form.allowBackorder,
+          trackInventory: form.trackInventory,
+          isFeatured: form.isFeatured,
+          isNewArrival: form.isNewArrival,
+          isOnPromotion: form.isOnPromotion,
+          promotionEndsAt: form.promotionEndsAt
+            ? new Date(form.promotionEndsAt).toISOString()
+            : null,
+          status: form.status,
+          weight: form.weight ? parseFloat(form.weight) : undefined,
+          length: form.length ? parseFloat(form.length) : undefined,
+          width: form.width ? parseFloat(form.width) : undefined,
+          height: form.height ? parseFloat(form.height) : undefined,
+          // Grocery fields
+          netWeight: form.netWeight || undefined,
+          packageSize: form.packageSize || undefined,
+          unitsPerCarton: form.unitsPerCarton
+            ? parseInt(form.unitsPerCarton)
+            : undefined,
+          origin: form.origin || undefined,
+          ingredients: form.ingredients || undefined,
+          allergens: form.allergens
+            ? form.allergens
+                .split(",")
+                .map((a) => a.trim())
+                .filter(Boolean)
+            : [],
+          storageInstructions: form.storageInstructions || undefined,
+          shelfLifeDays: form.shelfLifeDays
+            ? parseInt(form.shelfLifeDays)
+            : undefined,
+          servingSize: form.servingSize || undefined,
+          servingsPerPack: form.servingsPerPack || undefined,
+          naifdaNumber: form.naifdaNumber || undefined,
+          requiresRefrigeration: form.requiresRefrigeration,
+          requiresFreezing: form.requiresFreezing,
+          isOrganic: form.isOrganic,
+          isHalal: form.isHalal,
+          isKosher: form.isKosher,
+          isVegan: form.isVegan,
+          isGlutenFree: form.isGlutenFree,
+          nutritionalInfo:
+            Object.keys(nutritionalInfo).length > 0
+              ? nutritionalInfo
+              : undefined,
+          metaTitle: form.metaTitle || undefined,
+          metaDescription: form.metaDescription || undefined,
+          metaKeywords: form.metaKeywords || undefined,
+          // Scalable product fields
+          isScalable: form.isScalable,
+          scaleUnit: form.isScalable
+            ? form.scaleUnit === "custom"
+              ? form.scaleUnitCustom || "unit"
+              : form.scaleUnit
+            : undefined,
+          pricePerUnit:
+            form.isScalable && form.pricePerUnit
+              ? parseFloat(form.pricePerUnit)
+              : undefined,
+          minOrderQty:
+            form.isScalable && form.minOrderQty
+              ? parseFloat(form.minOrderQty)
+              : undefined,
+          maxOrderQty:
+            form.isScalable && form.maxOrderQty
+              ? parseFloat(form.maxOrderQty)
+              : undefined,
+          scaleStep:
+            form.isScalable && form.scaleStep
+              ? parseFloat(form.scaleStep)
+              : undefined,
+          scaleWareCode:
+            form.isScalable && form.scaleWareCode
+              ? form.scaleWareCode.trim()
+              : undefined,
+          scalePresets:
+            form.isScalable && form.scalePresets
+              ? form.scalePresets
+                  .split(",")
+                  .map((v) => parseFloat(v.trim()))
+                  .filter((v) => !isNaN(v))
+              : [],
+        };
+      };
+
       // When a Staff or Sales user edits an existing product, any change to
       // the product's own stockQuantity OR to an existing variation's
       // dedicated preset stock goes through admin approval instead of being
@@ -717,15 +838,20 @@ export default function ProductForm({ productId, onSave }: Props) {
         // variations keep their non-stock edits, but any EXISTING variation's
         // dedicated stock is forced back to its pre-edit value (the number
         // above is what actually gets applied, once approved).
-        const images = form.media
-          .filter((m) => m.type === "image")
-          .map((m) => m.url);
-        const nutritionalInfo: any = {};
-        Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
-          if (v) nutritionalInfo[k] = parseFloat(v as string);
-        });
-        const variationsPayload = form.isScalable
-          ? activeVariations.map((v) => ({
+        //
+        // This used to build its OWN separate, hand-duplicated payload
+        // object (payloadNoStock) instead of reusing the field list below —
+        // which meant every field added to the full payload afterward (SEO,
+        // grocery details, nutrition, scalePresets, shipping dimensions...)
+        // silently never made it into a non-admin save. That's exactly the
+        // bug that was reported: a non-admin setting scalePresets on a
+        // product had the value discarded because payloadNoStock simply
+        // never had a scalePresets key at all. Now there's one shared field
+        // list (buildCommonFields below); only stockQuantity and each
+        // variation's dedicated stock differ by role.
+        const activeVariationsForSave = variations.filter((v) => v.label.trim());
+        const nonAdminVariationsPayload = form.isScalable
+          ? activeVariationsForSave.map((v) => ({
               id: v.id,
               label: v.label.trim(),
               quantity: parseFloat(v.quantity),
@@ -741,132 +867,22 @@ export default function ProductForm({ productId, onSave }: Props) {
               isActive: v.isActive,
             }))
           : [];
-        const payloadNoStock: any = {
-          name: form.name,
-          slug: form.slug || generateSlug(form.name),
-          description: form.description,
-          shortDescription: form.shortDescription,
-          price: parseFloat(form.price),
-          comparePrice: form.comparePrice ? parseFloat(form.comparePrice) : undefined,
-          costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
-          sku: form.sku,
-          barcode: form.barcode || undefined,
-          categoryId: form.categoryId,
-          brandId: form.brandId || undefined,
-          tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
-          images,
-          lowStockThreshold: Number(form.lowStockThreshold),
-          allowBackorder: form.allowBackorder,
-          trackInventory: form.trackInventory,
-          isFeatured: form.isFeatured,
-          isNewArrival: form.isNewArrival,
-          isOnPromotion: form.isOnPromotion,
-          promotionEndsAt: form.promotionEndsAt ? new Date(form.promotionEndsAt).toISOString() : null,
-          status: form.status,
-          isScalable: form.isScalable,
-          scaleUnit: form.isScalable ? (form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit) : undefined,
-          pricePerUnit: form.isScalable && form.pricePerUnit ? parseFloat(form.pricePerUnit) : undefined,
-          minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
-          maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
-          scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
-          scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
-          variations: variationsPayload,
-        };
-        await apiPut(`/products/${productId}`, payloadNoStock);
+        await apiPut(`/products/${productId}`, {
+          ...buildCommonFields(),
+          variations: nonAdminVariationsPayload,
+          // stockQuantity deliberately omitted — an absent key means "don't
+          // touch this field" on the backend, same as every other field a
+          // non-admin isn't allowed to write directly.
+        });
         onSave?.();
         setSaving(false);
         return;
       }
-      const images = form.media
-        .filter((m) => m.type === "image")
-        .map((m) => m.url);
 
-      // Build nutritional info object (only include non-empty values)
-      const nutritionalInfo: any = {};
-      Object.entries(form.nutritionalInfo).forEach(([k, v]) => {
-        if (v) nutritionalInfo[k] = parseFloat(v as string);
-      });
-
+      // ── ADMIN (or brand-new product) — every field, including stock ────────
       const payload = {
-        name: form.name,
-        slug: form.slug || generateSlug(form.name),
-        description: form.description,
-        shortDescription: form.shortDescription,
-        price: parseFloat(form.price),
-        comparePrice: form.comparePrice
-          ? parseFloat(form.comparePrice)
-          : undefined,
-        costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
-        sku: form.sku,
-        barcode: form.barcode || undefined,
-        categoryId: form.categoryId,
-        brandId: form.brandId || undefined,
-        tags: form.tags
-          ? form.tags
-              .split(",")
-              .map((t) => t.trim())
-              .filter(Boolean)
-          : [],
-        images,
+        ...buildCommonFields(),
         stockQuantity: Number(form.stockQuantity),
-        lowStockThreshold: Number(form.lowStockThreshold),
-        allowBackorder: form.allowBackorder,
-        trackInventory: form.trackInventory,
-        isFeatured: form.isFeatured,
-        isNewArrival: form.isNewArrival,
-        isOnPromotion: form.isOnPromotion,
-        promotionEndsAt: form.promotionEndsAt
-          ? new Date(form.promotionEndsAt).toISOString()
-          : null,
-        status: form.status,
-        weight: form.weight ? parseFloat(form.weight) : undefined,
-        length: form.length ? parseFloat(form.length) : undefined,
-        width: form.width ? parseFloat(form.width) : undefined,
-        height: form.height ? parseFloat(form.height) : undefined,
-        // Grocery fields
-        netWeight: form.netWeight || undefined,
-        packageSize: form.packageSize || undefined,
-        unitsPerCarton: form.unitsPerCarton
-          ? parseInt(form.unitsPerCarton)
-          : undefined,
-        origin: form.origin || undefined,
-        ingredients: form.ingredients || undefined,
-        allergens: form.allergens
-          ? form.allergens
-              .split(",")
-              .map((a) => a.trim())
-              .filter(Boolean)
-          : [],
-        storageInstructions: form.storageInstructions || undefined,
-        shelfLifeDays: form.shelfLifeDays
-          ? parseInt(form.shelfLifeDays)
-          : undefined,
-        servingSize: form.servingSize || undefined,
-        servingsPerPack: form.servingsPerPack || undefined,
-        naifdaNumber: form.naifdaNumber || undefined,
-        requiresRefrigeration: form.requiresRefrigeration,
-        requiresFreezing: form.requiresFreezing,
-        isOrganic: form.isOrganic,
-        isHalal: form.isHalal,
-        isKosher: form.isKosher,
-        isVegan: form.isVegan,
-        isGlutenFree: form.isGlutenFree,
-        nutritionalInfo:
-          Object.keys(nutritionalInfo).length > 0 ? nutritionalInfo : undefined,
-        metaTitle: form.metaTitle || undefined,
-        metaDescription: form.metaDescription || undefined,
-        metaKeywords: form.metaKeywords || undefined,
-        // Scalable product fields
-        isScalable: form.isScalable,
-        scaleUnit: form.isScalable ? (form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit) : undefined,
-        pricePerUnit: form.isScalable && form.pricePerUnit ? parseFloat(form.pricePerUnit) : undefined,
-        minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
-        maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
-        scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
-        scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
-        scalePresets: form.isScalable && form.scalePresets
-          ? form.scalePresets.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v))
-          : [],
         // Structured, individually-priced presets (e.g. "500g Pack")
         variations: form.isScalable
           ? variations
