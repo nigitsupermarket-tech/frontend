@@ -24,6 +24,18 @@ import { apiGet, apiPost, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 
+// Same unit vocabulary as the "Add Product" form's Scale/Weight tab
+// (SCALE_UNITS in product-form.tsx) — kept as a short, focused list here
+// since CECON scale sheets are weight-based in practice, plus a "custom"
+// escape hatch for anything else.
+const SCALE_UNIT_OPTIONS = [
+  { value: "kg", label: "kg (kilogram)" },
+  { value: "g", label: "g (gram)" },
+  { value: "lb", label: "lb (pound)" },
+  { value: "L", label: "L (litre)" },
+  { value: "custom", label: "Custom…" },
+];
+
 interface ImportResult {
   success: number;
   failed: number;
@@ -200,6 +212,13 @@ export function ImportExportModal({
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [scaleCategoryId, setScaleCategoryId] = useState("");
   const [scaleDefaultStock, setScaleDefaultStock] = useState("10");
+  // Every row this importer creates is marked as a scalable/weighed
+  // product (see backend importScaleGoodsSheet) — these two just control
+  // what unit and step it's scalable BY, same fields the "Add Product"
+  // form's Scale/Weight tab exposes.
+  const [scaleUnit, setScaleUnit] = useState("kg");
+  const [scaleUnitCustom, setScaleUnitCustom] = useState("");
+  const [scaleStep, setScaleStep] = useState("0.1");
 
   // ── Recent imports + undo ───────────────────────────────────────────────
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
@@ -580,6 +599,13 @@ export function ImportExportModal({
       return;
     }
 
+    if (scaleUnit === "custom" && !scaleUnitCustom.trim()) {
+      toast("Enter a custom unit name (e.g. scoop, wrap, portion).", "error");
+      setProgress({ stage: "error", percent: 0, message: "Missing unit name" });
+      resetInput();
+      return;
+    }
+
     setProgress({ stage: "uploading", percent: 35, message: "Uploading…" });
 
     let response: Response;
@@ -588,6 +614,11 @@ export function ImportExportModal({
       formData.append("file", file);
       if (scaleCategoryId) formData.append("categoryId", scaleCategoryId);
       formData.append("defaultStock", scaleDefaultStock || "10");
+      formData.append(
+        "scaleUnit",
+        scaleUnit === "custom" ? scaleUnitCustom.trim() : scaleUnit,
+      );
+      formData.append("scaleStep", scaleStep || "0.1");
 
       response = await new Promise<Response>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -872,6 +903,65 @@ export function ImportExportModal({
                           Used for any row without its own Stock column value.
                         </p>
                       </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                            Unit of measurement
+                          </label>
+                          <select
+                            value={scaleUnit}
+                            onChange={(e) => setScaleUnit(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                          >
+                            {SCALE_UNIT_OPTIONS.map((u) => (
+                              <option key={u.value} value={u.value}>
+                                {u.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                            Scale step
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={scaleStep}
+                            onChange={(e) => setScaleStep(e.target.value)}
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                          />
+                        </div>
+                      </div>
+                      {scaleUnit === "custom" && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                            Custom unit name
+                          </label>
+                          <input
+                            type="text"
+                            value={scaleUnitCustom}
+                            onChange={(e) => setScaleUnitCustom(e.target.value)}
+                            placeholder="e.g. scoop, wrap, portion"
+                            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                          />
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-400 -mt-2">
+                        Every product from this sheet is created as scalable,
+                        with{" "}
+                        <strong>
+                          Price per 1{" "}
+                          {scaleUnit === "custom"
+                            ? scaleUnitCustom || "unit"
+                            : scaleUnit}
+                        </strong>{" "}
+                        set from the sheet's own Price column — no need to open
+                        each one afterwards to toggle "sold by
+                        measurement/scale" on.
+                      </p>
 
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-2">

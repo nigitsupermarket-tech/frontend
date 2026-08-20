@@ -18,7 +18,7 @@ import { apiGet, apiPost, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { useRouter } from "next/navigation";
-import { formatDate } from "@/lib/utils";
+import { formatDate, getProductImage } from "@/lib/utils";
 import Image from "next/image";
 
 interface StockRequest {
@@ -272,48 +272,50 @@ export default function StockApprovalsPage() {
       </div>
 
       {/* Bulk actions bar */}
-      {canAction && filters.status === "PENDING" && pendingRequests.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-wrap items-center gap-4">
-          <button
-            onClick={toggleAll}
-            className="flex items-center gap-2 text-sm font-medium text-amber-800"
-          >
-            {allPendingSelected ? (
-              <CheckSquare className="w-4 h-4" />
-            ) : (
-              <Square className="w-4 h-4" />
+      {canAction &&
+        filters.status === "PENDING" &&
+        pendingRequests.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-wrap items-center gap-4">
+            <button
+              onClick={toggleAll}
+              className="flex items-center gap-2 text-sm font-medium text-amber-800"
+            >
+              {allPendingSelected ? (
+                <CheckSquare className="w-4 h-4" />
+              ) : (
+                <Square className="w-4 h-4" />
+              )}
+              {allPendingSelected ? "Deselect all" : "Select all pending"}
+            </button>
+            {selected.size > 0 && (
+              <>
+                <span className="text-sm text-amber-700">
+                  {selected.size} selected
+                </span>
+                <div className="flex items-center gap-2 flex-1">
+                  <input
+                    placeholder="Review note (optional)"
+                    value={reviewNote}
+                    onChange={(e) => setReviewNote(e.target.value)}
+                    className="flex-1 max-w-xs px-3 py-1.5 text-sm border border-amber-300 rounded-xl focus:outline-none"
+                  />
+                  <button
+                    onClick={handleBulkApprove}
+                    disabled={bulkActioning}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {bulkActioning ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4" />
+                    )}
+                    Bulk Approve ({selected.size})
+                  </button>
+                </div>
+              </>
             )}
-            {allPendingSelected ? "Deselect all" : "Select all pending"}
-          </button>
-          {selected.size > 0 && (
-            <>
-              <span className="text-sm text-amber-700">
-                {selected.size} selected
-              </span>
-              <div className="flex items-center gap-2 flex-1">
-                <input
-                  placeholder="Review note (optional)"
-                  value={reviewNote}
-                  onChange={(e) => setReviewNote(e.target.value)}
-                  className="flex-1 max-w-xs px-3 py-1.5 text-sm border border-amber-300 rounded-xl focus:outline-none"
-                />
-                <button
-                  onClick={handleBulkApprove}
-                  disabled={bulkActioning}
-                  className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white text-sm font-semibold rounded-xl hover:bg-green-700 disabled:opacity-50"
-                >
-                  {bulkActioning ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <CheckCircle className="w-4 h-4" />
-                  )}
-                  Bulk Approve ({selected.size})
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -409,15 +411,13 @@ export default function StockApprovalsPage() {
                       {/* Product */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          {req.product?.images?.[0] && (
-                            <Image
-                              src={req.product.images[0]}
-                              alt={req.productName}
-                              width={32}
-                              height={32}
-                              className="w-8 h-8 rounded-lg object-cover border border-gray-100 shrink-0"
-                            />
-                          )}
+                          <Image
+                            src={getProductImage(req.product?.images ?? [])}
+                            alt={req.productName}
+                            width={32}
+                            height={32}
+                            className="w-8 h-8 rounded-lg object-cover border border-gray-100 shrink-0"
+                          />
                           <div>
                             <p className="font-medium text-gray-900 line-clamp-1">
                               {req.productName}

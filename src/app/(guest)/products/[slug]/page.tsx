@@ -174,7 +174,9 @@ export default function ProductDetailPage() {
   const [selectedImage, setSelectedImage] = useState(0);
   // Any image URL that fails to load falls back to the placeholder instead
   // of showing a broken icon (e.g. a deleted Cloudinary asset).
-  const [brokenImageUrls, setBrokenImageUrls] = useState<Set<string>>(new Set());
+  const [brokenImageUrls, setBrokenImageUrls] = useState<Set<string>>(
+    new Set(),
+  );
   const [activeTab, setActiveTab] = useState<
     "description" | "nutrition" | "reviews"
   >("description");
@@ -187,7 +189,9 @@ export default function ProductDetailPage() {
   const [scaleInput, setScaleInput] = useState(""); // typed input string for scalable
 
   // Structured variation selection (e.g. "500g Pack") and pack count
-  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
+  const [selectedVariationId, setSelectedVariationId] = useState<string | null>(
+    null,
+  );
   const [variationPacks, setVariationPacks] = useState(1);
 
   // Sync scaleQty to product's minOrderQty once product is loaded
@@ -268,7 +272,9 @@ export default function ProductDetailPage() {
   // ── Structured variations (labeled, individually-priced presets) ──────────
   const activeVariations = (product.variations || []).filter((v) => v.isActive);
   const hasVariations = activeVariations.length > 0;
-  const selectedVariation = activeVariations.find((v) => v.id === selectedVariationId);
+  const selectedVariation = activeVariations.find(
+    (v) => v.id === selectedVariationId,
+  );
   const variationDedicated =
     !!selectedVariation &&
     selectedVariation.stockQuantity !== null &&
@@ -277,10 +283,14 @@ export default function ProductDetailPage() {
     ? variationDedicated
       ? (selectedVariation.stockQuantity as number)
       : product.trackInventory
-        ? Math.floor((product.stockQuantity ?? Infinity) / selectedVariation.quantity)
+        ? Math.floor(
+            (product.stockQuantity ?? Infinity) / selectedVariation.quantity,
+          )
         : Infinity
     : Infinity;
-  const variationPrice = selectedVariation ? selectedVariation.price * variationPacks : 0;
+  const variationPrice = selectedVariation
+    ? selectedVariation.price * variationPacks
+    : 0;
 
   const roundStep = (val: number) =>
     parseFloat((Math.round(val / step) * step).toFixed(10));
@@ -389,8 +399,10 @@ export default function ProductDetailPage() {
               )}
               <Image
                 src={
-                  brokenImageUrls.has(getProductImage(product.images, selectedImage))
-                    ? "/images/placeholder-product.png"
+                  brokenImageUrls.has(
+                    getProductImage(product.images, selectedImage),
+                  )
+                    ? "/images/placeholder-product.svg"
                     : getProductImage(product.images, selectedImage)
                 }
                 alt={product.name}
@@ -400,7 +412,9 @@ export default function ProductDetailPage() {
                 priority
                 onError={() =>
                   setBrokenImageUrls((prev) =>
-                    new Set(prev).add(getProductImage(product.images, selectedImage)),
+                    new Set(prev).add(
+                      getProductImage(product.images, selectedImage),
+                    ),
                   )
                 }
               />
@@ -418,7 +432,11 @@ export default function ProductDetailPage() {
                     }`}
                   >
                     <Image
-                      src={brokenImageUrls.has(img) ? "/images/placeholder-product.png" : img}
+                      src={
+                        brokenImageUrls.has(img)
+                          ? "/images/placeholder-product.svg"
+                          : img
+                      }
                       alt={`view ${i + 1}`}
                       className="w-full h-full object-cover"
                       width={80}
@@ -489,7 +507,8 @@ export default function ProductDetailPage() {
                         {formatPrice(selectedVariation.price)}
                       </span>
                       {selectedVariation.compareAtPrice &&
-                        selectedVariation.compareAtPrice > selectedVariation.price && (
+                        selectedVariation.compareAtPrice >
+                          selectedVariation.price && (
                           <span className="text-lg text-gray-400 line-through">
                             {formatPrice(selectedVariation.compareAtPrice)}
                           </span>
@@ -499,7 +518,8 @@ export default function ProductDetailPage() {
                       </span>
                     </div>
                     <span className="flex items-center gap-1 px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">
-                      <Scale className="w-3 h-3" /> {activeVariations.length} option
+                      <Scale className="w-3 h-3" /> {activeVariations.length}{" "}
+                      option
                       {activeVariations.length === 1 ? "" : "s"}
                     </span>
                   </>
@@ -628,12 +648,14 @@ export default function ProductDetailPage() {
                       <div className="flex flex-wrap gap-2">
                         {activeVariations.map((v) => {
                           const dedicated =
-                            v.stockQuantity !== null && v.stockQuantity !== undefined;
+                            v.stockQuantity !== null &&
+                            v.stockQuantity !== undefined;
                           const available = dedicated
                             ? (v.stockQuantity as number)
                             : product.trackInventory
                               ? Math.floor(
-                                  (product.stockQuantity ?? Infinity) / v.quantity,
+                                  (product.stockQuantity ?? Infinity) /
+                                    v.quantity,
                                 )
                               : Infinity;
                           const soldOut = available <= 0;
@@ -663,7 +685,11 @@ export default function ProductDetailPage() {
                                 )}
                               </span>
                               <span className="text-sm font-bold text-brand-700">
-                                {pricesHidden ? <PriceLock compact /> : formatPrice(v.price)}
+                                {pricesHidden ? (
+                                  <PriceLock compact />
+                                ) : (
+                                  formatPrice(v.price)
+                                )}
                               </span>
                               <span className="text-[10px] text-gray-400">
                                 {soldOut
@@ -712,7 +738,11 @@ export default function ProductDetailPage() {
                           </span>
                           <div className="text-right flex-1">
                             <p className="text-2xl font-bold text-brand-700">
-                              {pricesHidden ? <PriceLock /> : formatPrice(variationPrice)}
+                              {pricesHidden ? (
+                                <PriceLock />
+                              ) : (
+                                formatPrice(variationPrice)
+                              )}
                             </p>
                           </div>
                         </div>
@@ -733,8 +763,8 @@ export default function ProductDetailPage() {
                             disabled={cartLoading || variationMaxPacks < 1}
                             className="flex-1 py-3.5 bg-brand-600 text-white font-semibold rounded-xl hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2 transition-colors"
                           >
-                            <ShoppingCart className="w-5 h-5" />{" "}
-                            Add {variationPacks}× {selectedVariation.label} to Cart
+                            <ShoppingCart className="w-5 h-5" /> Add{" "}
+                            {variationPacks}× {selectedVariation.label} to Cart
                           </button>
                           <button
                             onClick={() => setFavorited((w) => !w)}
@@ -834,7 +864,11 @@ export default function ProductDetailPage() {
                         </span>
                         <div className="text-right flex-1">
                           <p className="text-2xl font-bold text-brand-700">
-                            {pricesHidden ? <PriceLock /> : formatPrice(effectivePrice)}
+                            {pricesHidden ? (
+                              <PriceLock />
+                            ) : (
+                              formatPrice(effectivePrice)
+                            )}
                           </p>
                           {!pricesHidden && product.pricePerUnit && (
                             <p className="text-xs text-gray-400">
@@ -847,7 +881,11 @@ export default function ProductDetailPage() {
                     {presetOnly && (
                       <div className="text-right">
                         <p className="text-2xl font-bold text-brand-700">
-                          {pricesHidden ? <PriceLock /> : formatPrice(effectivePrice)}
+                          {pricesHidden ? (
+                            <PriceLock />
+                          ) : (
+                            formatPrice(effectivePrice)
+                          )}
                         </p>
                         {!pricesHidden && product.pricePerUnit && (
                           <p className="text-xs text-gray-400">

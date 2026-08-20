@@ -28,7 +28,7 @@ import { useCartStore } from "@/store/cartStore";
 import { useAuthStore } from "@/store/authStore";
 import { useToast } from "@/store/uiStore";
 import { apiPost, apiGet, getApiError } from "@/lib/api";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, getProductImage } from "@/lib/utils";
 import { nigeriaStatesLgas } from "@/data/nigeria-states-lgas";
 import Image from "next/image";
 import Link from "next/link";
@@ -138,9 +138,11 @@ function itemVariationMaxPacks(item: any): number {
     (v: any) => v.id === item.variationId,
   );
   if (variation) {
-    return variation.stockQuantity !== null && variation.stockQuantity !== undefined
+    return variation.stockQuantity !== null &&
+      variation.stockQuantity !== undefined
       ? variation.stockQuantity
-      : item.product?.trackInventory !== false && item.product?.stockQuantity != null
+      : item.product?.trackInventory !== false &&
+          item.product?.stockQuantity != null
         ? Math.floor(item.product.stockQuantity / variation.quantity)
         : Infinity;
   }
@@ -238,15 +240,13 @@ function CartSummaryAdjuster() {
         return (
           <div key={item.id} className="flex items-center gap-2">
             <div className="w-9 h-9 bg-white rounded border overflow-hidden shrink-0">
-              {item.product?.images?.[0] && (
-                <Image
-                  src={item.product.images[0]}
-                  alt={item.product?.name || ""}
-                  width={36}
-                  height={36}
-                  className="w-full h-full object-contain"
-                />
-              )}
+              <Image
+                src={getProductImage(item.product?.images ?? [])}
+                alt={item.product?.name || ""}
+                width={36}
+                height={36}
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-gray-900 line-clamp-1">
@@ -288,7 +288,9 @@ function CartSummaryAdjuster() {
                 <span
                   className={`text-center text-xs font-semibold ${scalable ? "w-16 px-0.5" : "w-6"}`}
                 >
-                  {isVariation ? `×${item.quantity}` : fmtQty(item.quantity, unit)}
+                  {isVariation
+                    ? `×${item.quantity}`
+                    : fmtQty(item.quantity, unit)}
                 </span>
                 <button
                   onClick={handleInc}
@@ -1158,15 +1160,13 @@ export default function CheckoutPageContent() {
                         className="flex items-center gap-3 py-3 border-b border-gray-100"
                       >
                         <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                          {item.product?.images?.[0] && (
-                            <Image
-                              src={item.product.images[0]}
-                              alt={item.product?.name || ""}
-                              width={48}
-                              height={48}
-                              className="w-full h-full object-contain"
-                            />
-                          )}
+                          <Image
+                            src={getProductImage(item.product?.images ?? [])}
+                            alt={item.product?.name || ""}
+                            width={48}
+                            height={48}
+                            className="w-full h-full object-contain"
+                          />
                         </div>
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900 line-clamp-1">
@@ -1174,7 +1174,8 @@ export default function CheckoutPageContent() {
                           </p>
                           {item.variationLabel ? (
                             <p className="text-xs text-gray-500">
-                              {item.variationLabel} — {item.quantity} × {formatPrice(item.price)}
+                              {item.variationLabel} — {item.quantity} ×{" "}
+                              {formatPrice(item.price)}
                             </p>
                           ) : scalable && unit ? (
                             <p className="text-xs text-green-700 flex items-center gap-1">

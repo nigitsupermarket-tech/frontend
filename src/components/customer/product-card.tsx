@@ -31,16 +31,24 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const activeVariations = (product.variations || []).filter((v) => v.isActive);
   const hasVariations = activeVariations.length > 0;
   const [selectedVariationId, setSelectedVariationId] = useState<string | null>(
-    () => activeVariations.find((v) => v.isDefault)?.id || activeVariations[0]?.id || null,
+    () =>
+      activeVariations.find((v) => v.isDefault)?.id ||
+      activeVariations[0]?.id ||
+      null,
   );
   const selectedVariation =
-    activeVariations.find((v) => v.id === selectedVariationId) || activeVariations[0] || null;
+    activeVariations.find((v) => v.id === selectedVariationId) ||
+    activeVariations[0] ||
+    null;
   const [packCount, setPackCount] = useState(1);
 
   const variationAvailable = selectedVariation
-    ? selectedVariation.stockQuantity !== null && selectedVariation.stockQuantity !== undefined
+    ? selectedVariation.stockQuantity !== null &&
+      selectedVariation.stockQuantity !== undefined
       ? selectedVariation.stockQuantity // dedicated stock — packs on hand
-      : Math.floor((product.stockQuantity || 0) / (selectedVariation.quantity || 1)) // shared pool
+      : Math.floor(
+          (product.stockQuantity || 0) / (selectedVariation.quantity || 1),
+        ) // shared pool
     : 0;
   const variationOutOfStock =
     !!selectedVariation && product.trackInventory && variationAvailable <= 0;
@@ -65,7 +73,9 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const [quantity, setQuantity] = useState(
     isScalable ? (presetOnly ? 0 : minQty) : 1,
   );
-  const hasSelection = hasVariations ? !!selectedVariation : !presetOnly || quantity > 0;
+  const hasSelection = hasVariations
+    ? !!selectedVariation
+    : !presetOnly || quantity > 0;
 
   // parseFloat + toFixed(10) avoids floating-point drift (e.g. 0.1+0.1+0.1 ≠ 0.3)
   const roundStep = (val: number) =>
@@ -206,7 +216,11 @@ export function ProductCard({ product, className }: ProductCardProps) {
           className="relative w-1/2 shrink-0 aspect-square bg-gray-50 border-r border-gray-100 overflow-hidden block"
         >
           <Image
-            src={imgFailed ? "/images/placeholder-product.png" : getProductImage(product.images)}
+            src={
+              imgFailed
+                ? "/images/placeholder-product.svg"
+                : getProductImage(product.images)
+            }
             alt={product.name}
             fill
             className="object-contain p-2"
@@ -253,7 +267,10 @@ export function ProductCard({ product, className }: ProductCardProps) {
                     <PriceLock compact />
                   ) : (
                     <>
-                      {selectedVariation ? formatPrice(selectedVariation.price) : ""} / {selectedVariation?.label}
+                      {selectedVariation
+                        ? formatPrice(selectedVariation.price)
+                        : ""}{" "}
+                      / {selectedVariation?.label}
                     </>
                   )}
                 </span>
@@ -315,7 +332,9 @@ export function ProductCard({ product, className }: ProductCardProps) {
                   const packsAvailable =
                     v.stockQuantity !== null && v.stockQuantity !== undefined
                       ? v.stockQuantity
-                      : Math.floor((product.stockQuantity || 0) / (v.quantity || 1));
+                      : Math.floor(
+                          (product.stockQuantity || 0) / (v.quantity || 1),
+                        );
                   const soldOut = product.trackInventory && packsAvailable <= 0;
                   return (
                     <button
@@ -363,10 +382,14 @@ export function ProductCard({ product, className }: ProductCardProps) {
                   <button
                     onClick={() =>
                       setPackCount((q) =>
-                        product.trackInventory ? Math.min(q + 1, variationAvailable) : q + 1,
+                        product.trackInventory
+                          ? Math.min(q + 1, variationAvailable)
+                          : q + 1,
                       )
                     }
-                    disabled={product.trackInventory && packCount >= variationAvailable}
+                    disabled={
+                      product.trackInventory && packCount >= variationAvailable
+                    }
                     className="w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Plus className="w-2 h-2 sm:w-2.5 sm:h-2.5" />
@@ -471,9 +494,12 @@ export function ProductCard({ product, className }: ProductCardProps) {
                 </span>
                 {hasVariations &&
                   selectedVariation?.compareAtPrice &&
-                  selectedVariation.compareAtPrice > selectedVariation.price && (
+                  selectedVariation.compareAtPrice >
+                    selectedVariation.price && (
                     <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">
-                      {formatPrice(selectedVariation.compareAtPrice * packCount)}
+                      {formatPrice(
+                        selectedVariation.compareAtPrice * packCount,
+                      )}
                     </span>
                   )}
                 {!hasVariations &&

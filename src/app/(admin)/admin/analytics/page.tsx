@@ -1,244 +1,658 @@
+// frontend/src/app/(admin)/admin/products/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
-  TrendingUp,
-  ShoppingBag,
-  Users,
-  DollarSign,
-  RefreshCcw,
+  Plus,
+  Search,
+  Edit2,
+  Trash2,
+  Upload,
+  X,
+  ArrowUpDown,
+  Package,
+  AlertTriangle,
 } from "lucide-react";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from "recharts";
-import { apiGet } from "@/lib/api";
+import { Product, Pagination } from "@/types";
+import { apiGet, apiDelete, apiPost, getApiError } from "@/lib/api";
 import { formatPrice, formatNumber } from "@/lib/utils";
-import { PageLoader } from "@/components/shared/loading-spinner";
+import {
+  TableRowSkeleton,
+  EmptyState,
+  ErrorState,
+} from "@/components/shared/loading-spinner";
+import { useToast } from "@/store/uiStore";
+import { ImportExportModal } from "@/components/admin/products/import-export-modal";
+import { useAuthStore } from "@/store/authStore";
 import Image from "next/image";
 
-const COLORS = ["#7c3aed", "#d97706", "#10b981", "#3b82f6", "#ef4444"];
+const stockColors: Record<string, string> = {
+  IN_STOCK: "bg-green-100 text-green-700",
+  LOW_STOCK: "bg-orange-100 text-orange-700",
+  OUT_OF_STOCK: "bg-red-100 text-red-700",
+};
 
-export default function AdminAnalyticsPage() {
-  const [overview, setOverview] = useState<any>(null);
-  const [revenue, setRevenue] = useState<any[]>([]);
-  const [topProducts, setTopProducts] = useState<any[]>([]);
-  const [ordersByStatus, setOrdersByStatus] = useState<any[]>([]);
+interface Filters {
+  search: string;
+  categoryId: string;
+  brandId: string;
+  status: string;
+  stockStatus: string;
+  sort: string;
+}
+
+const SORT_OPTIONS = [
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+  { value: "popular", label: "Most Sales" },
+  { value: "price-asc", label: "Price ↑" },
+  { value: "price-desc", label: "Price ↓" },
+  { value: "name-asc", label: "Name A–Z" },
+  { value: "name-desc", label: "Name Z–A" },
+];
+
+export default function AdminProductsPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [range, setRange] = useState("30");
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [showImportExport, setShowImportExport] = useState(false);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>(
+    [],
+  );
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [filters, setFilters] = useState<Filters>({
+    search: "",
+    categoryId: "",
+    brandId: "",
+    status: "",
+    stockStatus: "",
+    sort: "newest",
+  });
 
-  const fetchAll = async () => {
-    setIsLoading(true);
+  // Quick-stock modal for non-admin roles
+  const [quickStock, setQuickStock] = useState<{
+    product: Product;
+    qty: string;
+    reason: string;
+  } | null>(null);
+  const [savingStock, setSavingStock] = useState(false);
+
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === "ADMIN";
+  // Hard delete is restricted to ADMIN and MANAGER roles
+  const canDelete = user?.role === "ADMIN" || user?.role === "MANAGER";
+  const toast = useToast();
+
+  // Warning dialog state for hard delete
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    apiGet<any>("/categories?limit=200")
+      .then((r) => setCategories(r.data?.categories || []))
+      .catch(() => {});
+    apiGet<any>("/brands?limit=200")
+      .then((r) => setBrands(r.data?.brands || []))
+      .catch(() => {});
+  }, []);
+
+  const fetchProducts = useCallback(
+    async (p = page, f = filters) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const params: any = { page: p, limit: 20, sort: f.sort };
+        params.status = f.status || "all"; // "all" bypasses the ACTIVE-only filter
+        if (f.search) params.search = f.search;
+        if (f.categoryId) params.categoryId = f.categoryId;
+        if (f.brandId) params.brandId = f.brandId;
+        if (f.stockStatus) params.stockStatus = f.stockStatus;
+        const res = await apiGet<any>("/products", params);
+        setProducts(res.data.products);
+        setPagination(res.data.pagination);
+      } catch {
+        setError("Failed to load products");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [page, filters],
+  );
+
+  useEffect(() => {
+    fetchProducts(page, filters);
+  }, [page]);
+
+  const applyFilter = (key: keyof Filters, value: string) => {
+    const next = { ...filters, [key]: value };
+    setFilters(next);
+    setPage(1);
+    fetchProducts(1, next);
+  };
+
+  const clearFilters = () => {
+    const reset: Filters = {
+      search: "",
+      categoryId: "",
+      brandId: "",
+      status: "",
+      stockStatus: "",
+      sort: "newest",
+    };
+    setFilters(reset);
+    setPage(1);
+    fetchProducts(1, reset);
+  };
+
+  const hasActive =
+    filters.search ||
+    filters.categoryId ||
+    filters.brandId ||
+    filters.status ||
+    filters.stockStatus;
+
+  // Opens the warning dialog for a given product (does not delete yet)
+  const requestDelete = (product: Product) => {
+    if (!canDelete) {
+      toast("Only admins and managers can delete products", "error");
+      return;
+    }
+    setDeleteTarget(product);
+  };
+
+  // Confirmed from the warning dialog — performs the actual hard delete
+  const confirmDelete = async () => {
+    if (!deleteTarget || !canDelete) return;
+    setIsDeleting(true);
     try {
-      const [ov, rev, top, statusRes] = await Promise.all([
-        apiGet<any>("/analytics/dashboard"),
-        apiGet<any>("/analytics/revenue", { period: range }),
-        apiGet<any>("/analytics/top-products", { period: range, limit: 5 }),
-        apiGet<any>("/analytics/orders-by-status"),
-      ]);
-      setOverview(ov.data);
-      setRevenue(rev.data.chart || []);
-      setTopProducts(top.data.products || []);
-      setOrdersByStatus(
-        (statusRes.data.statusBreakdown || []).map((s: any) => ({
-          name: s.label,
-          value: s.count,
-        })),
-      );
-    } catch {
+      await apiDelete(`/products/${deleteTarget.id}`);
+      toast(`"${deleteTarget.name}" permanently deleted`, "success");
+      setDeleteTarget(null);
+      fetchProducts(page, filters);
+    } catch (err) {
+      toast(getApiError(err), "error");
     } finally {
-      setIsLoading(false);
+      setIsDeleting(false);
     }
   };
 
-  useEffect(() => {
-    fetchAll();
-  }, [range]);
+  const submitQuickStock = async () => {
+    if (!quickStock) return;
+    setSavingStock(true);
+    try {
+      const res = await apiPost<any>("/stock-approvals", {
+        productId: quickStock.product.id,
+        requestedQty: Number(quickStock.qty),
+        reason:
+          quickStock.reason || `Quick stock update by ${user?.name || "staff"}`,
+        source: "PRODUCT_LIST",
+      });
+      if (res.data?.autoApproved) {
+        toast("Stock updated", "success");
+      } else {
+        toast("Stock change request submitted for admin approval", "success");
+      }
+      setQuickStock(null);
+      fetchProducts(page, filters);
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setSavingStock(false);
+    }
+  };
 
-  if (isLoading) return <PageLoader />;
-
-  const stats = [
-    {
-      icon: DollarSign,
-      label: "Total Revenue",
-      value: formatPrice(overview?.combined?.totalRevenue ?? overview?.revenue?.total ?? 0),
-      color: "text-brand-600",
-      bg: "bg-brand-50",
-    },
-    {
-      icon: ShoppingBag,
-      label: "Total Orders",
-      value: formatNumber(overview?.combined?.totalOrders ?? overview?.orders?.total ?? 0),
-      color: "text-blue-600",
-      bg: "bg-blue-50",
-    },
-    {
-      icon: Users,
-      label: "Total Customers",
-      value: formatNumber(overview?.customers?.total || 0),
-      color: "text-green-600",
-      bg: "bg-green-50",
-    },
-    {
-      icon: TrendingUp,
-      label: "Avg Order Value",
-      value: formatPrice(overview?.combined?.avgOrderValue || 0),
-      color: "text-purple-600",
-      bg: "bg-purple-50",
-    },
-  ];
+  const sel =
+    "px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500 bg-white";
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">Analytics & Reports</h1>
+    <div className="p-6 space-y-5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <h1 className="text-xl font-bold text-gray-900">Products</h1>
         <div className="flex items-center gap-3">
-          <select
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-brand-500"
-          >
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-            <option value="365">Last 12 months</option>
-          </select>
           <button
-            onClick={fetchAll}
-            className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:text-brand-600 hover:border-brand-300 transition-colors"
+            onClick={() => setShowImportExport(true)}
+            className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-50 transition-colors"
           >
-            <RefreshCcw className="w-4 h-4" />
+            <Upload className="w-4 h-4" /> Import/Export
           </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(({ icon: Icon, label, value, color, bg }) => (
-          <div
-            key={label}
-            className="bg-white rounded-2xl border border-gray-100 p-5"
+          <Link
+            href="/admin/products/new"
+            className={`flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition-colors ${user?.role === "SALES" ? "hidden" : ""}`}
           >
-            <div
-              className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center mb-3`}
+            <Plus className="w-4 h-4" /> Add Product
+          </Link>
+        </div>
+      </div>
+
+      {/* ── Filters ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
+        <div className="flex flex-wrap gap-3">
+          {/* Search */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              applyFilter("search", filters.search);
+            }}
+            className="relative flex-1 min-w-48"
+          >
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="search"
+              value={filters.search}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, search: e.target.value }))
+              }
+              placeholder="Search name, SKU, barcode…"
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
+            />
+          </form>
+
+          {/* Category */}
+          <select
+            value={filters.categoryId}
+            onChange={(e) => applyFilter("categoryId", e.target.value)}
+            className={sel}
+          >
+            <option value="">All Categories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Brand */}
+          <select
+            value={filters.brandId}
+            onChange={(e) => applyFilter("brandId", e.target.value)}
+            className={sel}
+          >
+            <option value="">All Brands</option>
+            {brands.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Product Status */}
+          <select
+            value={filters.status}
+            onChange={(e) => applyFilter("status", e.target.value)}
+            className={sel}
+          >
+            <option value="">All Statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="DRAFT">Draft</option>
+            <option value="DISCONTINUED">Discontinued</option>
+          </select>
+
+          {/* Stock Status */}
+          <select
+            value={filters.stockStatus}
+            onChange={(e) => applyFilter("stockStatus", e.target.value)}
+            className={sel}
+          >
+            <option value="">All Stock</option>
+            <option value="IN_STOCK">In Stock</option>
+            <option value="LOW_STOCK">Low Stock</option>
+            <option value="OUT_OF_STOCK">Out of Stock</option>
+          </select>
+
+          {/* Sort */}
+          <select
+            value={filters.sort}
+            onChange={(e) => applyFilter("sort", e.target.value)}
+            className={sel}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
+          {hasActive && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1 px-3 py-2 text-sm text-red-500 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
             >
-              <Icon className={`w-5 h-5 ${color}`} />
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          )}
+        </div>
+        {hasActive && pagination && (
+          <p className="text-xs text-gray-400">
+            {pagination.total} products match your filters
+          </p>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-50 bg-gray-50/50">
+                {[
+                  "Product",
+                  "SKU / Barcode",
+                  "Price",
+                  "Stock",
+                  "Status",
+                  "Sales",
+                  "",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="text-left px-4 py-3 font-medium text-gray-500 text-xs uppercase tracking-wide"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {error ? (
+                <tr>
+                  <td colSpan={7} className="py-8">
+                    <ErrorState
+                      message={error}
+                      retry={() => fetchProducts(page, filters)}
+                    />
+                  </td>
+                </tr>
+              ) : isLoading ? (
+                Array.from({ length: 10 }).map((_, i) => (
+                  <TableRowSkeleton key={i} cols={7} />
+                ))
+              ) : products.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>
+                    <EmptyState
+                      title={
+                        hasActive
+                          ? "No products match your filters"
+                          : "No products yet"
+                      }
+                      action={
+                        hasActive ? (
+                          <button
+                            onClick={clearFilters}
+                            className="px-4 py-2 border border-gray-200 rounded-xl text-sm"
+                          >
+                            Clear Filters
+                          </button>
+                        ) : (
+                          <Link
+                            href="/admin/products/new"
+                            className={`px-4 py-2 bg-brand-600 text-white rounded-xl text-sm ${user?.role === "SALES" ? "hidden" : ""}`}
+                          >
+                            Add your first product
+                          </Link>
+                        )
+                      }
+                    />
+                  </td>
+                </tr>
+              ) : (
+                products.map((product) => (
+                  <tr
+                    key={product.id}
+                    className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Image
+                          src={
+                            product.images[0] ||
+                            "/images/placeholder-product.svg"
+                          }
+                          alt={product.name}
+                          className="w-10 h-10 rounded-lg object-cover border border-gray-100"
+                          width={40}
+                          height={40}
+                        />
+                        <div>
+                          <p className="font-medium text-gray-900 line-clamp-1">
+                            {product.name}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {product.category?.name}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-600">
+                      <p>{product.sku}</p>
+                      {product.barcode && (
+                        <p className="text-gray-400 mt-0.5">
+                          {product.barcode}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-gray-900">
+                        {formatPrice(product.price)}
+                      </p>
+                      {product.comparePrice && (
+                        <p className="text-xs text-gray-400 line-through">
+                          {formatPrice(product.comparePrice)}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium ${stockColors[product.stockStatus] || "bg-gray-100 text-gray-500"}`}
+                      >
+                        {product.stockQuantity} units
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          product.status === "ACTIVE"
+                            ? "bg-green-100 text-green-700"
+                            : product.status === "DRAFT"
+                              ? "bg-gray-100 text-gray-600"
+                              : "bg-red-100 text-red-600"
+                        }`}
+                      >
+                        {product.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 font-medium">
+                      {formatNumber(product.salesCount)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        {/* Non-admin: quick stock button */}
+                        {!isAdmin && (
+                          <button
+                            onClick={() =>
+                              setQuickStock({
+                                product,
+                                qty: String(product.stockQuantity),
+                                reason: "",
+                              })
+                            }
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                            title="Update Stock"
+                          >
+                            <Package className="w-4 h-4" />
+                          </button>
+                        )}
+                        <Link
+                          href={`/admin/products/${product.id}`}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Link>
+                        {/* Only ADMIN and MANAGER can see/perform hard delete */}
+                        {canDelete && (
+                          <button
+                            onClick={() => requestDelete(product)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {pagination && pagination.totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-50 flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              {pagination.total} products total
+            </p>
+            <div className="flex gap-2 items-center">
+              <button
+                onClick={() => setPage(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-xs text-gray-500">
+                {page} / {pagination.totalPages}
+              </span>
+              <button
+                onClick={() => setPage(page + 1)}
+                disabled={page >= pagination.totalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs disabled:opacity-40"
+              >
+                Next
+              </button>
             </div>
-            <p className="text-xs text-gray-500 font-medium">{label}</p>
-            <p className="mt-1 text-xl font-bold text-gray-900">{value}</p>
           </div>
-        ))}
+        )}
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-5">
-        {/* Revenue chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-5">
-          <h2 className="font-semibold text-gray-900 mb-4">Revenue Trend</h2>
-          {revenue.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={revenue}>
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => v.slice(5)}
-                />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `₦${formatNumber(v)}`}
-                />
-                <Tooltip
-                  formatter={(v: any) => [formatPrice(v), "Revenue"]}
-                  labelFormatter={(l) => `Date: ${l}`}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="#7c3aed"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-52 flex items-center justify-center text-gray-400 text-sm">
-              No data for this period
-            </div>
-          )}
-        </div>
+      <ImportExportModal
+        isOpen={showImportExport}
+        onClose={() => setShowImportExport(false)}
+        onSuccess={() => fetchProducts(page, filters)}
+      />
 
-        {/* Orders by status */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <h2 className="font-semibold text-gray-900 mb-4">Orders by Status</h2>
-          {ordersByStatus.length > 0 ? (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={ordersByStatus}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={75}
-                  label={false}
-                >
-                  {ordersByStatus.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend
-                  formatter={(v) => <span className="text-xs">{v}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-52 flex items-center justify-center text-gray-400 text-sm">
-              No data
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Top products */}
-      {topProducts.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <h2 className="font-semibold text-gray-900 mb-4">
-            Top Selling Products
-          </h2>
-          <div className="space-y-3">
-            {topProducts.map((p, i) => (
-              <div key={p.id} className="flex items-center gap-4">
-                <span className="w-6 text-xs font-bold text-gray-400">
-                  #{i + 1}
-                </span>
-                <Image
-                  src={p.images?.[0] || "/images/placeholder-product.png"}
-                  alt={p.name}
-                  className="w-10 h-10 rounded-lg object-cover border border-gray-100 shrink-0"
-                  width={40}
-                  height={40}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 line-clamp-1">
-                    {p.name}
-                  </p>
-                  <p className="text-xs text-gray-400">{p.salesCount} sold</p>
-                </div>
-                <p className="font-semibold text-sm text-brand-700 shrink-0">
-                  {formatPrice(p.revenue || 0)}
+      {/* Hard Delete Warning Dialog (ADMIN / MANAGER only) */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-full bg-red-50 shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="font-bold text-gray-900">Delete product?</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  This will permanently delete{" "}
+                  <span className="font-medium text-gray-700">
+                    &ldquo;{deleteTarget.name}&rdquo;
+                  </span>{" "}
+                  and all of its images. This action cannot be undone.
                 </p>
               </div>
-            ))}
+            </div>
+
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800">
+              ⚠️ Hard delete: the product record is removed completely — it
+              cannot be recovered or restored.
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+              >
+                {isDeleting ? "Deleting…" : "Delete Permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Stock Update Modal (Staff / Sales) */}
+      {quickStock && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-gray-900">Update Stock</h2>
+              <button onClick={() => setQuickStock(null)}>
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 truncate">
+              {quickStock.product.name}
+            </p>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              ⚠️ This request will be sent to admin for approval before the
+              stock is updated.
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                New Stock Quantity
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={quickStock.qty}
+                onChange={(e) =>
+                  setQuickStock({ ...quickStock, qty: e.target.value })
+                }
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Current: {quickStock.product.stockQuantity} units
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Reason (optional)
+              </label>
+              <input
+                type="text"
+                value={quickStock.reason}
+                onChange={(e) =>
+                  setQuickStock({ ...quickStock, reason: e.target.value })
+                }
+                placeholder="e.g. Received new delivery"
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setQuickStock(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitQuickStock}
+                disabled={savingStock}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-60"
+              >
+                {savingStock ? "Submitting…" : "Submit Request"}
+              </button>
+            </div>
           </div>
         </div>
       )}

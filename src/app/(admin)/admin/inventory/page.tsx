@@ -197,8 +197,16 @@ export default function AdminInventoryPage() {
                   <td colSpan={7}>
                     <EmptyState
                       icon={<Package className="w-12 h-12" />}
-                      title={search ? "No items match your search" : "No inventory issues"}
-                      description={search ? "Try a different name, SKU or barcode" : "All products are well stocked"}
+                      title={
+                        search
+                          ? "No items match your search"
+                          : "No inventory issues"
+                      }
+                      description={
+                        search
+                          ? "Try a different name, SKU or barcode"
+                          : "All products are well stocked"
+                      }
                     />
                   </td>
                 </tr>
@@ -206,134 +214,138 @@ export default function AdminInventoryPage() {
                 filteredItems.map((item) => {
                   const key = rowKey(item);
                   const isEditingThis =
-                    editing?.id === item.id && editing?.variationId === item.variationId;
+                    editing?.id === item.id &&
+                    editing?.variationId === item.variationId;
                   return (
-                  <tr
-                    key={key}
-                    className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Image
-                          src={
-                            item.images?.[0] ||
-                            "/images/placeholder-product.png"
-                          }
-                          alt={item.name}
-                          className="w-9 h-9 rounded-lg object-cover border border-gray-100 shrink-0"
-                          width={36}
-                          height={36}
-                        />
-                        <div>
-                          <span className="font-medium text-gray-900 line-clamp-1 block">
-                            {item.name}
-                          </span>
-                          {item.variationLabel && (
-                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
-                              Preset: {item.variationLabel}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                      <p>{item.sku}</p>
-                      {item.barcode && (
-                        <p className="text-gray-400 mt-0.5">{item.barcode}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">
-                      {item.category?.name || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isEditingThis ? (
-                        <input
-                          type="number"
-                          min={0}
-                          value={editing!.qty}
-                          onChange={(e) =>
-                            setEditing({ ...editing!, qty: e.target.value })
-                          }
-                          className="w-20 px-2 py-1 rounded-lg border border-brand-300 text-sm focus:outline-none"
-                          autoFocus
-                        />
-                      ) : (
-                        <span
-                          className={`font-semibold ${item.stockQuantity === 0 ? "text-red-600" : item.stockQuantity <= item.lowStockThreshold ? "text-orange-600" : "text-gray-900"}`}
-                        >
-                          {item.stockQuantity}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">
-                      {item.lowStockThreshold}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium ${stockColors[item.stockStatus || ""] || "bg-gray-100 text-gray-700"}`}
-                      >
-                        {item.stockStatus
-                          ? item.stockStatus.replace("_", " ")
-                          : "UNKNOWN"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {isEditingThis ? (
-                        <div className="space-y-1.5">
-                          <input
-                            placeholder="Reason (optional)"
-                            value={editing!.reason}
-                            onChange={(e) =>
-                              setEditing({ ...editing!, reason: e.target.value })
+                    <tr
+                      key={key}
+                      className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Image
+                            src={
+                              item.images?.[0] ||
+                              "/images/placeholder-product.svg"
                             }
-                            className="w-40 px-2 py-1 rounded-lg border border-gray-200 text-xs focus:outline-none"
+                            alt={item.name}
+                            className="w-9 h-9 rounded-lg object-cover border border-gray-100 shrink-0"
+                            width={36}
+                            height={36}
                           />
-                          <div className="flex gap-1">
-                            <button
-                              onClick={handleSave}
-                              disabled={saving}
-                              className="px-3 py-1 bg-brand-600 text-white text-xs rounded-lg disabled:opacity-60 flex items-center gap-1"
-                            >
-                              {saving ? (
-                                "…"
-                              ) : isAdmin ? (
-                                "Save"
-                              ) : (
-                                <>
-                                  <Clock className="w-3 h-3" /> Submit
-                                </>
-                              )}
-                            </button>
-                            <button
-                              onClick={() => setEditing(null)}
-                              className="px-3 py-1 border border-gray-200 text-xs rounded-lg"
-                            >
-                              Cancel
-                            </button>
+                          <div>
+                            <span className="font-medium text-gray-900 line-clamp-1 block">
+                              {item.name}
+                            </span>
+                            {item.variationLabel && (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
+                                Preset: {item.variationLabel}
+                              </span>
+                            )}
                           </div>
-                          {!isAdmin && (
-                            <p className="text-[10px] text-amber-600">
-                              Will need admin approval
-                            </p>
-                          )}
                         </div>
-                      ) : (
-                        <button
-                          onClick={() =>
-                            setEditing({
-                              id: item.id,
-                              variationId: item.variationId,
-                              qty: item.stockQuantity.toString(),
-                              reason: "",
-                            })
-                          }
-                          className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg hover:border-brand-300 hover:text-brand-600 transition-colors"
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                        <p>{item.sku}</p>
+                        {item.barcode && (
+                          <p className="text-gray-400 mt-0.5">{item.barcode}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {item.category?.name || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isEditingThis ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={editing!.qty}
+                            onChange={(e) =>
+                              setEditing({ ...editing!, qty: e.target.value })
+                            }
+                            className="w-20 px-2 py-1 rounded-lg border border-brand-300 text-sm focus:outline-none"
+                            autoFocus
+                          />
+                        ) : (
+                          <span
+                            className={`font-semibold ${item.stockQuantity === 0 ? "text-red-600" : item.stockQuantity <= item.lowStockThreshold ? "text-orange-600" : "text-gray-900"}`}
+                          >
+                            {item.stockQuantity}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">
+                        {item.lowStockThreshold}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${stockColors[item.stockStatus || ""] || "bg-gray-100 text-gray-700"}`}
                         >
-                          Adjust
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                          {item.stockStatus
+                            ? item.stockStatus.replace("_", " ")
+                            : "UNKNOWN"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {isEditingThis ? (
+                          <div className="space-y-1.5">
+                            <input
+                              placeholder="Reason (optional)"
+                              value={editing!.reason}
+                              onChange={(e) =>
+                                setEditing({
+                                  ...editing!,
+                                  reason: e.target.value,
+                                })
+                              }
+                              className="w-40 px-2 py-1 rounded-lg border border-gray-200 text-xs focus:outline-none"
+                            />
+                            <div className="flex gap-1">
+                              <button
+                                onClick={handleSave}
+                                disabled={saving}
+                                className="px-3 py-1 bg-brand-600 text-white text-xs rounded-lg disabled:opacity-60 flex items-center gap-1"
+                              >
+                                {saving ? (
+                                  "…"
+                                ) : isAdmin ? (
+                                  "Save"
+                                ) : (
+                                  <>
+                                    <Clock className="w-3 h-3" /> Submit
+                                  </>
+                                )}
+                              </button>
+                              <button
+                                onClick={() => setEditing(null)}
+                                className="px-3 py-1 border border-gray-200 text-xs rounded-lg"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                            {!isAdmin && (
+                              <p className="text-[10px] text-amber-600">
+                                Will need admin approval
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() =>
+                              setEditing({
+                                id: item.id,
+                                variationId: item.variationId,
+                                qty: item.stockQuantity.toString(),
+                                reason: "",
+                              })
+                            }
+                            className="px-3 py-1.5 border border-gray-200 text-xs font-medium rounded-lg hover:border-brand-300 hover:text-brand-600 transition-colors"
+                          >
+                            Adjust
+                          </button>
+                        )}
+                      </td>
+                    </tr>
                   );
                 })
               )}

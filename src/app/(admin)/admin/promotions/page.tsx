@@ -19,7 +19,7 @@ import {
 import { apiGet, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatPrice } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { cn, getProductImage } from "@/lib/utils";
 import Image from "next/image";
 
 interface Product {
@@ -216,15 +216,13 @@ export default function PromotionsPage() {
                 className="flex items-center gap-4 px-4 py-3 hover:bg-gray-50"
               >
                 <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                  {product.images?.[0] && (
-                    <Image
-                      src={product.images[0]}
-                      alt={product.name}
-                      width={48}
-                      height={48}
-                      className="w-full h-full object-contain"
-                    />
-                  )}
+                  <Image
+                    src={getProductImage(product.images)}
+                    alt={product.name}
+                    width={48}
+                    height={48}
+                    className="w-full h-full object-contain"
+                  />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">
@@ -350,13 +348,11 @@ export default function PromotionsPage() {
                         )}
                       >
                         <div className="w-9 h-9 bg-gray-100 rounded overflow-hidden flex-shrink-0">
-                          {product.images?.[0] && (
-                            <img
-                              src={product.images[0]}
-                              alt=""
-                              className="w-full h-full object-contain"
-                            />
-                          )}
+                          <img
+                            src={getProductImage(product.images)}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">

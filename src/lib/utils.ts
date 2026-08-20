@@ -28,7 +28,7 @@ export function formatPriceCompact(amount: number): string {
   const sign = amount < 0 ? "-" : "";
 
   const abbreviate = (value: number, suffix: string) => {
-    const str = (value).toFixed(2).replace(/\.?0+$/, "");
+    const str = value.toFixed(2).replace(/\.?0+$/, "");
     return `${sign}₦${str}${suffix}`;
   };
 
@@ -114,7 +114,12 @@ export function generateSKU(productName: string): string {
   // Take up to first 3 words, grab first 3 letters each, uppercase
   const words = productName.trim().split(/\s+/).slice(0, 3);
   const prefix = words
-    .map((w) => w.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 3))
+    .map((w) =>
+      w
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toUpperCase()
+        .slice(0, 3),
+    )
     .join("")
     .slice(0, 8);
   // 5-char random hex suffix
@@ -267,7 +272,7 @@ export function formatFileSize(bytes: number): string {
 
 // ─── URL builder for product images ──────────────────────────────────────────
 export function getProductImage(images: string[], index = 0): string {
-  return images?.[index] || "/images/placeholder-product.png";
+  return images?.[index] || "/images/placeholder-product.svg";
 }
 
 // ─── Validation helpers ──────────────────────────────────────────────────────
