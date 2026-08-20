@@ -31,23 +31,22 @@ export function formatPrice(amount: number): string {
 // cart line while the price correctly reflected 0.075kg — same number,
 // two different displayed precisions for the same sale.
 //
-// This derives the decimal places to show FROM the step itself (0.005 →
-// 3 decimals, 0.1 → 1 decimal, 1 → 0 decimals), so the display always has
-// enough precision to actually distinguish two different quantities a
-// step apart, and trims trailing zeros so a whole-number quantity still
-// reads as "2 kg" rather than "2.000 kg".
+// Client requirement: always show a COMPULSORY minimum of 3 decimals —
+// "0.380", never "0.38", and never trimmed or collapsed to a bare
+// integer ("2.000", not "2"). If the product's own scaleStep needs even
+// finer precision than that (e.g. 0.0005), that wins instead — 3 is a
+// floor, not a ceiling.
 export function scaleQtyDecimals(step?: number | null): number {
-  if (!step || step <= 0) return 2; // no step available — reasonable default
+  if (!step || step <= 0) return 3; // no step available — 3-decimal floor
   const s = step.toString();
   const dotIdx = s.indexOf(".");
-  const decimals = dotIdx === -1 ? 0 : s.length - dotIdx - 1;
+  const stepDecimals = dotIdx === -1 ? 0 : s.length - dotIdx - 1;
+  const decimals = Math.max(3, stepDecimals);
   return Math.min(decimals, 4); // sane ceiling — a scale isn't THAT precise
 }
 
 export function formatScaleQty(qty: number, step?: number | null): string {
-  if (qty % 1 === 0) return qty.toFixed(0);
-  const decimals = scaleQtyDecimals(step);
-  return qty.toFixed(decimals).replace(/\.?0+$/, "");
+  return qty.toFixed(scaleQtyDecimals(step));
 }
 
 // ─── Abbreviated currency (for dashboard/stat cards where full figures
