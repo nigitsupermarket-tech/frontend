@@ -7,7 +7,15 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Plus, X, Tag, Scale, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  Plus,
+  X,
+  Tag,
+  Scale,
+  RefreshCw,
+} from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -143,17 +151,17 @@ const SCALE_UNITS = [
 ];
 
 const SCALE_STEPS: Record<string, number[]> = {
-  kg:     [0.25, 0.5, 1, 1.5, 2, 3, 5],
-  g:      [100, 250, 500, 750, 1000],
-  lb:     [0.5, 1, 2, 3, 5],
-  L:      [0.25, 0.5, 1, 1.5, 2],
-  ml:     [100, 250, 500, 750, 1000],
-  cup:    [0.5, 1, 2, 3, 4],
-  piece:  [1, 2, 3, 5, 10],
-  dozen:  [1, 2, 3],
-  bag:    [1, 2, 3, 5],
-  bunch:  [1, 2, 3],
-  crate:  [1, 2, 3],
+  kg: [0.25, 0.5, 1, 1.5, 2, 3, 5],
+  g: [100, 250, 500, 750, 1000],
+  lb: [0.5, 1, 2, 3, 5],
+  L: [0.25, 0.5, 1, 1.5, 2],
+  ml: [100, 250, 500, 750, 1000],
+  cup: [0.5, 1, 2, 3, 4],
+  piece: [1, 2, 3, 5, 10],
+  dozen: [1, 2, 3],
+  bag: [1, 2, 3, 5],
+  bunch: [1, 2, 3],
+  crate: [1, 2, 3],
   custom: [1, 2, 3, 5],
 };
 
@@ -247,15 +255,15 @@ const emptyForm = {
 
   // ── Scalable / weighted product ──
   isScalable: false,
-  scaleUnit: "kg",          // unit of measurement
-  scaleUnitCustom: "",      // only used when scaleUnit === "custom"
-  pricePerUnit: "",         // price per 1 unit (e.g. ₦2,000/kg)
-  minOrderQty: "0.1",       // minimum orderable quantity
-  maxOrderQty: "",          // optional max (e.g. 10 kg)
-  scaleStep: "0.1",         // increment step in POS / online store
-  scalePresets: "",         // comma-separated quick-select values e.g. "0.5,1,2,3"
-  scaleWareCode: "",        // the CECON scale's own 7-digit item code, for
-                             // recognizing its printed barcode at checkout
+  scaleUnit: "kg", // unit of measurement
+  scaleUnitCustom: "", // only used when scaleUnit === "custom"
+  pricePerUnit: "", // price per 1 unit (e.g. ₦2,000/kg)
+  minOrderQty: "0.1", // minimum orderable quantity
+  maxOrderQty: "", // optional max (e.g. 10 kg)
+  scaleStep: "0.1", // increment step in POS / online store
+  scalePresets: "", // comma-separated quick-select values e.g. "0.5,1,2,3"
+  scaleWareCode: "", // the CECON scale's own 7-digit item code, for
+  // recognizing its printed barcode at checkout
 };
 
 export default function ProductForm({ productId, onSave }: Props) {
@@ -449,7 +457,13 @@ export default function ProductForm({ productId, onSave }: Props) {
     );
 
   const handleSave = async () => {
-    if (!form.name || !form.price || !form.sku || !form.categoryId || !form.barcode) {
+    if (
+      !form.name ||
+      !form.price ||
+      !form.sku ||
+      !form.categoryId ||
+      !form.barcode
+    ) {
       toast.error(
         "Please fill in all required fields (Name, SKU, Barcode, Price, Category)",
       );
@@ -461,7 +475,8 @@ export default function ProductForm({ productId, onSave }: Props) {
     // is derived from the ordered quantity — so "weight" means kg per 1 unit of scale.
     // For all other products, weight is the fixed shipping weight per item.
     const weightBasedUnits = ["kg", "g", "lb"];
-    const isWeightBased = form.isScalable && weightBasedUnits.includes(form.scaleUnit);
+    const isWeightBased =
+      form.isScalable && weightBasedUnits.includes(form.scaleUnit);
     if (!form.weight) {
       if (isWeightBased) {
         // For kg/g/lb scalable products auto-fill weight = 1 (1 kg per 1 kg ordered)
@@ -480,7 +495,10 @@ export default function ProductForm({ productId, onSave }: Props) {
 
     // ── Scalable product validation ────────────────────────────────────────
     if (form.isScalable) {
-      const unit = form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit;
+      const unit =
+        form.scaleUnit === "custom"
+          ? form.scaleUnitCustom || "unit"
+          : form.scaleUnit;
 
       // pricePerUnit required
       if (!form.pricePerUnit || parseFloat(form.pricePerUnit) <= 0) {
@@ -494,8 +512,14 @@ export default function ProductForm({ productId, onSave }: Props) {
       // product into "preset-only" mode: no +/- increment is offered on
       // POS or the online store, and customers/cashiers must tap one of
       // the Preset Weights below instead.
-      if (form.scaleStep === "" || form.scaleStep === null || isNaN(parseFloat(form.scaleStep))) {
-        toast.error(`Scale step is required (enter 0 for preset-only weights, e.g. 0.1 for increments)`);
+      if (
+        form.scaleStep === "" ||
+        form.scaleStep === null ||
+        isNaN(parseFloat(form.scaleStep))
+      ) {
+        toast.error(
+          `Scale step is required (enter 0 for preset-only weights, e.g. 0.1 for increments)`,
+        );
         setActiveTab("scalable");
         return;
       }
@@ -530,7 +554,9 @@ export default function ProductForm({ productId, onSave }: Props) {
       const minV = parseFloat(form.minOrderQty || "0");
       const stepV = parseFloat(form.scaleStep);
       if (minV > 0 && stepV > 0 && minV < stepV) {
-        toast.error(`Minimum order (${minV} ${unit}) cannot be less than the scale step (${stepV} ${unit})`);
+        toast.error(
+          `Minimum order (${minV} ${unit}) cannot be less than the scale step (${stepV} ${unit})`,
+        );
         setActiveTab("scalable");
         return;
       }
@@ -544,14 +570,18 @@ export default function ProductForm({ productId, onSave }: Props) {
           return;
         }
         if (minV > 0 && maxV <= minV) {
-          toast.error(`Maximum order (${maxV} ${unit}) must be greater than minimum order (${minV} ${unit})`);
+          toast.error(
+            `Maximum order (${maxV} ${unit}) must be greater than minimum order (${minV} ${unit})`,
+          );
           setActiveTab("scalable");
           return;
         }
         // Max order cannot exceed stock
         const stockInUnits = form.stockQuantity;
         if (form.trackInventory && stockInUnits > 0 && maxV > stockInUnits) {
-          toast.error(`Maximum order (${maxV} ${unit}) cannot exceed available stock (${stockInUnits} ${unit}). Update stock in the Inventory tab first.`);
+          toast.error(
+            `Maximum order (${maxV} ${unit}) cannot exceed available stock (${stockInUnits} ${unit}). Update stock in the Inventory tab first.`,
+          );
           setActiveTab("scalable");
           return;
         }
@@ -559,7 +589,10 @@ export default function ProductForm({ productId, onSave }: Props) {
 
       // Presets must all be positive and within min/max
       if (form.scalePresets) {
-        const presetVals = form.scalePresets.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v));
+        const presetVals = form.scalePresets
+          .split(",")
+          .map((v) => parseFloat(v.trim()))
+          .filter((v) => !isNaN(v));
         const invalid = presetVals.find((v) => v <= 0);
         if (invalid !== undefined) {
           toast.error(`All preset values must be greater than 0`);
@@ -569,7 +602,9 @@ export default function ProductForm({ productId, onSave }: Props) {
         if (minV > 0) {
           const tooSmall = presetVals.find((v) => v < minV);
           if (tooSmall !== undefined) {
-            toast.error(`Preset ${tooSmall} ${unit} is below the minimum order of ${minV} ${unit}`);
+            toast.error(
+              `Preset ${tooSmall} ${unit} is below the minimum order of ${minV} ${unit}`,
+            );
             setActiveTab("scalable");
             return;
           }
@@ -578,7 +613,9 @@ export default function ProductForm({ productId, onSave }: Props) {
           const maxV = parseFloat(form.maxOrderQty);
           const tooLarge = presetVals.find((v) => v > maxV);
           if (tooLarge !== undefined) {
-            toast.error(`Preset ${tooLarge} ${unit} exceeds the maximum order of ${maxV} ${unit}`);
+            toast.error(
+              `Preset ${tooLarge} ${unit} exceeds the maximum order of ${maxV} ${unit}`,
+            );
             setActiveTab("scalable");
             return;
           }
@@ -587,7 +624,9 @@ export default function ProductForm({ productId, onSave }: Props) {
 
       // Custom unit name required if scaleUnit === "custom"
       if (form.scaleUnit === "custom" && !form.scaleUnitCustom.trim()) {
-        toast.error(`Please enter a custom unit name (e.g. scoop, wrap, portion)`);
+        toast.error(
+          `Please enter a custom unit name (e.g. scoop, wrap, portion)`,
+        );
         setActiveTab("scalable");
         return;
       }
@@ -610,8 +649,13 @@ export default function ProductForm({ productId, onSave }: Props) {
           setActiveTab("scalable");
           return;
         }
-        if (v.dedicatedStock && (v.stockQuantity === "" || parseFloat(v.stockQuantity) < 0)) {
-          toast.error(`"${v.label}" has dedicated stock enabled but no valid stock quantity`);
+        if (
+          v.dedicatedStock &&
+          (v.stockQuantity === "" || parseFloat(v.stockQuantity) < 0)
+        ) {
+          toast.error(
+            `"${v.label}" has dedicated stock enabled but no valid stock quantity`,
+          );
           setActiveTab("scalable");
           return;
         }
@@ -619,14 +663,20 @@ export default function ProductForm({ productId, onSave }: Props) {
       const labels = activeVariations.map((v) => v.label.trim().toLowerCase());
       const dupLabel = labels.find((l, i) => labels.indexOf(l) !== i);
       if (dupLabel) {
-        toast.error(`Two variations are both labeled "${dupLabel}" — labels must be unique`);
+        toast.error(
+          `Two variations are both labeled "${dupLabel}" — labels must be unique`,
+        );
         setActiveTab("scalable");
         return;
       }
-      const barcodes = activeVariations.map((v) => v.barcode.trim()).filter(Boolean);
+      const barcodes = activeVariations
+        .map((v) => v.barcode.trim())
+        .filter(Boolean);
       const dupBarcode = barcodes.find((b, i) => barcodes.indexOf(b) !== i);
       if (dupBarcode) {
-        toast.error(`Barcode "${dupBarcode}" is used by more than one variation on this product`);
+        toast.error(
+          `Barcode "${dupBarcode}" is used by more than one variation on this product`,
+        );
         setActiveTab("scalable");
         return;
       }
@@ -645,8 +695,13 @@ export default function ProductForm({ productId, onSave }: Props) {
       setActiveTab("basic");
       return;
     }
-    if (form.comparePrice && parseFloat(form.comparePrice) <= parseFloat(form.price)) {
-      toast.error("Compare price (original price) should be higher than the selling price");
+    if (
+      form.comparePrice &&
+      parseFloat(form.comparePrice) <= parseFloat(form.price)
+    ) {
+      toast.error(
+        "Compare price (original price) should be higher than the selling price",
+      );
       setActiveTab("basic");
       return;
     }
@@ -672,7 +727,11 @@ export default function ProductForm({ productId, onSave }: Props) {
         // stock number actually changed. New variations (no id yet) keep
         // whatever initial stock is entered — there's no prior approved
         // value to protect, same as a brand-new product's initial stock.
-        const pendingApprovals: { variationId?: string; requestedQty: number; label: string }[] = [];
+        const pendingApprovals: {
+          variationId?: string;
+          requestedQty: number;
+          label: string;
+        }[] = [];
         if (newQty !== originalQty) {
           pendingApprovals.push({ requestedQty: newQty, label: "the product" });
         }
@@ -680,9 +739,15 @@ export default function ProductForm({ productId, onSave }: Props) {
           if (!v.id) continue;
           const originalStock = originalVariationStockRef.current[v.id] ?? null;
           const newStock =
-            v.dedicatedStock && v.stockQuantity !== "" ? parseFloat(v.stockQuantity) : null;
+            v.dedicatedStock && v.stockQuantity !== ""
+              ? parseFloat(v.stockQuantity)
+              : null;
           if (newStock !== null && newStock !== originalStock) {
-            pendingApprovals.push({ variationId: v.id, requestedQty: newStock, label: v.label });
+            pendingApprovals.push({
+              variationId: v.id,
+              requestedQty: newStock,
+              label: v.label,
+            });
           }
         }
 
@@ -700,10 +765,13 @@ export default function ProductForm({ productId, onSave }: Props) {
           );
           const failures = results.filter((r) => r.status === "rejected");
           const allAutoApproved = results.every(
-            (r) => r.status === "fulfilled" && (r.value as any).data?.autoApproved,
+            (r) =>
+              r.status === "fulfilled" && (r.value as any).data?.autoApproved,
           );
           if (failures.length > 0) {
-            toast.error(getApiError((failures[0] as PromiseRejectedResult).reason));
+            toast.error(
+              getApiError((failures[0] as PromiseRejectedResult).reason),
+            );
           } else if (allAutoApproved) {
             toast.success("Stock updated");
           } else {
@@ -730,7 +798,9 @@ export default function ProductForm({ productId, onSave }: Props) {
               label: v.label.trim(),
               quantity: parseFloat(v.quantity),
               price: parseFloat(v.price),
-              compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+              compareAtPrice: v.compareAtPrice
+                ? parseFloat(v.compareAtPrice)
+                : null,
               barcode: v.barcode.trim() || null,
               stockQuantity: v.id
                 ? (originalVariationStockRef.current[v.id] ?? null)
@@ -747,13 +817,20 @@ export default function ProductForm({ productId, onSave }: Props) {
           description: form.description,
           shortDescription: form.shortDescription,
           price: parseFloat(form.price),
-          comparePrice: form.comparePrice ? parseFloat(form.comparePrice) : undefined,
+          comparePrice: form.comparePrice
+            ? parseFloat(form.comparePrice)
+            : undefined,
           costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
           sku: form.sku,
           barcode: form.barcode || undefined,
           categoryId: form.categoryId,
           brandId: form.brandId || undefined,
-          tags: form.tags ? form.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+          tags: form.tags
+            ? form.tags
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean)
+            : [],
           images,
           lowStockThreshold: Number(form.lowStockThreshold),
           allowBackorder: form.allowBackorder,
@@ -761,15 +838,36 @@ export default function ProductForm({ productId, onSave }: Props) {
           isFeatured: form.isFeatured,
           isNewArrival: form.isNewArrival,
           isOnPromotion: form.isOnPromotion,
-          promotionEndsAt: form.promotionEndsAt ? new Date(form.promotionEndsAt).toISOString() : null,
+          promotionEndsAt: form.promotionEndsAt
+            ? new Date(form.promotionEndsAt).toISOString()
+            : null,
           status: form.status,
           isScalable: form.isScalable,
-          scaleUnit: form.isScalable ? (form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit) : undefined,
-          pricePerUnit: form.isScalable && form.pricePerUnit ? parseFloat(form.pricePerUnit) : undefined,
-          minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
-          maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
-          scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
-          scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
+          scaleUnit: form.isScalable
+            ? form.scaleUnit === "custom"
+              ? form.scaleUnitCustom || "unit"
+              : form.scaleUnit
+            : undefined,
+          pricePerUnit:
+            form.isScalable && form.pricePerUnit
+              ? parseFloat(form.pricePerUnit)
+              : undefined,
+          minOrderQty:
+            form.isScalable && form.minOrderQty
+              ? parseFloat(form.minOrderQty)
+              : undefined,
+          maxOrderQty:
+            form.isScalable && form.maxOrderQty
+              ? parseFloat(form.maxOrderQty)
+              : undefined,
+          scaleStep:
+            form.isScalable && form.scaleStep
+              ? parseFloat(form.scaleStep)
+              : undefined,
+          scaleWareCode:
+            form.isScalable && form.scaleWareCode
+              ? form.scaleWareCode.trim()
+              : undefined,
           variations: variationsPayload,
         };
         await apiPut(`/products/${productId}`, payloadNoStock);
@@ -858,15 +956,38 @@ export default function ProductForm({ productId, onSave }: Props) {
         metaKeywords: form.metaKeywords || undefined,
         // Scalable product fields
         isScalable: form.isScalable,
-        scaleUnit: form.isScalable ? (form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit) : undefined,
-        pricePerUnit: form.isScalable && form.pricePerUnit ? parseFloat(form.pricePerUnit) : undefined,
-        minOrderQty: form.isScalable && form.minOrderQty ? parseFloat(form.minOrderQty) : undefined,
-        maxOrderQty: form.isScalable && form.maxOrderQty ? parseFloat(form.maxOrderQty) : undefined,
-        scaleStep: form.isScalable && form.scaleStep ? parseFloat(form.scaleStep) : undefined,
-        scaleWareCode: form.isScalable && form.scaleWareCode ? form.scaleWareCode.trim() : undefined,
-        scalePresets: form.isScalable && form.scalePresets
-          ? form.scalePresets.split(",").map((v) => parseFloat(v.trim())).filter((v) => !isNaN(v))
-          : [],
+        scaleUnit: form.isScalable
+          ? form.scaleUnit === "custom"
+            ? form.scaleUnitCustom || "unit"
+            : form.scaleUnit
+          : undefined,
+        pricePerUnit:
+          form.isScalable && form.pricePerUnit
+            ? parseFloat(form.pricePerUnit)
+            : undefined,
+        minOrderQty:
+          form.isScalable && form.minOrderQty
+            ? parseFloat(form.minOrderQty)
+            : undefined,
+        maxOrderQty:
+          form.isScalable && form.maxOrderQty
+            ? parseFloat(form.maxOrderQty)
+            : undefined,
+        scaleStep:
+          form.isScalable && form.scaleStep
+            ? parseFloat(form.scaleStep)
+            : undefined,
+        scaleWareCode:
+          form.isScalable && form.scaleWareCode
+            ? form.scaleWareCode.trim()
+            : undefined,
+        scalePresets:
+          form.isScalable && form.scalePresets
+            ? form.scalePresets
+                .split(",")
+                .map((v) => parseFloat(v.trim()))
+                .filter((v) => !isNaN(v))
+            : [],
         // Structured, individually-priced presets (e.g. "500g Pack")
         variations: form.isScalable
           ? variations
@@ -1010,7 +1131,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                   />
                   <button
                     type="button"
-                    onClick={() => setField("sku", generateSKU(form.name || "PRODUCT"))}
+                    onClick={() =>
+                      setField("sku", generateSKU(form.name || "PRODUCT"))
+                    }
                     title="Regenerate SKU"
                     className="p-2 border border-gray-300 rounded hover:bg-gray-50 text-gray-500 hover:text-green-700 transition-colors"
                   >
@@ -1018,7 +1141,8 @@ export default function ProductForm({ productId, onSave }: Props) {
                   </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Auto-generated — click <RefreshCw className="w-2.5 h-2.5 inline" /> to regenerate
+                  Auto-generated — click{" "}
+                  <RefreshCw className="w-2.5 h-2.5 inline" /> to regenerate
                 </p>
               </div>
 
@@ -1141,9 +1265,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                   onChange={(e) => setField("status", e.target.value)}
                   className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded bg-white"
                 >
-                  <option value="ACTIVE">Active</option>
+                  <option value="ACTIVE">Published</option>
                   <option value="DRAFT">Draft</option>
-                  <option value="DISCONTINUED">Discontinued</option>
+                  <option value="DISCONTINUED">Archived</option>
                 </select>
               </div>
             </div>
@@ -1191,7 +1315,10 @@ export default function ProductForm({ productId, onSave }: Props) {
               <h3 className="font-semibold text-gray-900">Scalable Product</h3>
             </div>
             <p className="text-xs text-gray-500">
-              Enable this for products sold by weight, volume, or variable quantity — e.g. meat per kg, sugar per cup, drinks by the litre. The price and quantity fields below replace the fixed price/stock model.
+              Enable this for products sold by weight, volume, or variable
+              quantity — e.g. meat per kg, sugar per cup, drinks by the litre.
+              The price and quantity fields below replace the fixed price/stock
+              model.
             </p>
 
             <Checkbox
@@ -1207,7 +1334,8 @@ export default function ProductForm({ productId, onSave }: Props) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Unit of Measurement <span className="text-red-500">*</span>
+                      Unit of Measurement{" "}
+                      <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={form.scaleUnit}
@@ -1215,7 +1343,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                       className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded bg-white"
                     >
                       {SCALE_UNITS.map((u) => (
-                        <option key={u.value} value={u.value}>{u.label}</option>
+                        <option key={u.value} value={u.value}>
+                          {u.label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1268,12 +1398,18 @@ export default function ProductForm({ productId, onSave }: Props) {
 
                 {/* ── Preset-only mode notice ── */}
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-800 space-y-1">
-                  <p className="font-semibold">ℹ️ About Scale Step = 0 (preset-only weights)</p>
+                  <p className="font-semibold">
+                    ℹ️ About Scale Step = 0 (preset-only weights)
+                  </p>
                   <p className="text-blue-700">
-                    If <strong>Scale Step</strong> is set to <strong>0</strong>, the +/− increment buttons are removed on both
-                    the <strong>online store</strong> and the <strong>POS cashier screen</strong>. Customers and cashiers will
-                    only be able to select one of the <strong>Preset Weights</strong> configured below — no manual increment
-                    or typed-in quantity will be allowed. Make sure at least one Preset Weight is set whenever Scale Step is 0.
+                    If <strong>Scale Step</strong> is set to <strong>0</strong>,
+                    the +/− increment buttons are removed on both the{" "}
+                    <strong>online store</strong> and the{" "}
+                    <strong>POS cashier screen</strong>. Customers and cashiers
+                    will only be able to select one of the{" "}
+                    <strong>Preset Weights</strong> configured below — no manual
+                    increment or typed-in quantity will be allowed. Make sure at
+                    least one Preset Weight is set whenever Scale Step is 0.
                   </p>
                 </div>
 
@@ -1302,7 +1438,10 @@ export default function ProductForm({ productId, onSave }: Props) {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Preset Weights / Quick-Select Presets (comma-separated)
                     {parseFloat(form.scaleStep) === 0 && (
-                      <span className="text-red-500"> * required — Scale Step is 0</span>
+                      <span className="text-red-500">
+                        {" "}
+                        * required — Scale Step is 0
+                      </span>
                     )}
                   </label>
                   <input
@@ -1324,11 +1463,21 @@ export default function ProductForm({ productId, onSave }: Props) {
                   {/* Visual preview */}
                   {form.scalePresets && (
                     <div className="flex flex-wrap gap-2 mt-2">
-                      {form.scalePresets.split(",").map((v) => v.trim()).filter(Boolean).map((v, i) => (
-                        <span key={i} className="px-3 py-1 bg-green-50 border border-green-200 text-green-800 text-xs font-semibold rounded-full">
-                          {v} {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}
-                        </span>
-                      ))}
+                      {form.scalePresets
+                        .split(",")
+                        .map((v) => v.trim())
+                        .filter(Boolean)
+                        .map((v, i) => (
+                          <span
+                            key={i}
+                            className="px-3 py-1 bg-green-50 border border-green-200 text-green-800 text-xs font-semibold rounded-full"
+                          >
+                            {v}{" "}
+                            {form.scaleUnit === "custom"
+                              ? form.scaleUnitCustom || "unit"
+                              : form.scaleUnit}
+                          </span>
+                        ))}
                     </div>
                   )}
                 </div>
@@ -1337,7 +1486,10 @@ export default function ProductForm({ productId, onSave }: Props) {
                 <div className="border-t border-gray-200 pt-4 mt-4">
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-sm font-medium text-gray-700">
-                      Variations <span className="text-gray-400 font-normal">(optional — recommended)</span>
+                      Variations{" "}
+                      <span className="text-gray-400 font-normal">
+                        (optional — recommended)
+                      </span>
                     </label>
                     <button
                       type="button"
@@ -1348,19 +1500,24 @@ export default function ProductForm({ productId, onSave }: Props) {
                     </button>
                   </div>
                   <p className="text-xs text-gray-400 mb-3">
-                    Give each sellable preset its own label and price — e.g. "500g Pack"
-                    at ₦1,500 flat, rather than always deriving price from the unit price
-                    above. These show as uniform, labeled buttons for customers on the
-                    product page and for cashiers at POS, and can each have their own
-                    barcode for scanning and their own dedicated stock count if you
-                    pre-pack them ahead of time.
+                    Give each sellable preset its own label and price — e.g.
+                    "500g Pack" at ₦1,500 flat, rather than always deriving
+                    price from the unit price above. These show as uniform,
+                    labeled buttons for customers on the product page and for
+                    cashiers at POS, and can each have their own barcode for
+                    scanning and their own dedicated stock count if you pre-pack
+                    them ahead of time.
                   </p>
 
                   {variations.length === 0 ? (
                     <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-4 text-xs text-gray-500 text-center">
-                      No variations yet. Without any, this product falls back to the
-                      Price per {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit} and
-                      Preset Weights above (raw quantities, no individual labels/pricing).
+                      No variations yet. Without any, this product falls back to
+                      the Price per{" "}
+                      {form.scaleUnit === "custom"
+                        ? form.scaleUnitCustom || "unit"
+                        : form.scaleUnit}{" "}
+                      and Preset Weights above (raw quantities, no individual
+                      labels/pricing).
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1368,7 +1525,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                         <div
                           key={v._key}
                           className={`border rounded-xl p-3 space-y-2 ${
-                            v.isActive ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50 opacity-70"
+                            v.isActive
+                              ? "border-gray-200 bg-white"
+                              : "border-gray-200 bg-gray-50 opacity-70"
                           }`}
                         >
                           <div className="flex items-start gap-2">
@@ -1377,14 +1536,20 @@ export default function ProductForm({ productId, onSave }: Props) {
                                 type="text"
                                 value={v.label}
                                 onChange={(e) =>
-                                  updateVariationRow(v._key, { label: e.target.value })
+                                  updateVariationRow(v._key, {
+                                    label: e.target.value,
+                                  })
                                 }
                                 placeholder='Label — e.g. "500g Pack"'
                                 className="col-span-2 border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
                               />
                               <div>
                                 <label className="block text-[10px] text-gray-400 mb-0.5">
-                                  Quantity ({form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit})
+                                  Quantity (
+                                  {form.scaleUnit === "custom"
+                                    ? form.scaleUnitCustom || "unit"
+                                    : form.scaleUnit}
+                                  )
                                 </label>
                                 <input
                                   type="number"
@@ -1392,7 +1557,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                   min="0"
                                   value={v.quantity}
                                   onChange={(e) =>
-                                    updateVariationRow(v._key, { quantity: e.target.value })
+                                    updateVariationRow(v._key, {
+                                      quantity: e.target.value,
+                                    })
                                   }
                                   placeholder="0.5"
                                   className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
@@ -1408,7 +1575,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                   min="0"
                                   value={v.price}
                                   onChange={(e) =>
-                                    updateVariationRow(v._key, { price: e.target.value })
+                                    updateVariationRow(v._key, {
+                                      price: e.target.value,
+                                    })
                                   }
                                   placeholder="1500"
                                   className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
@@ -1424,7 +1593,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                   min="0"
                                   value={v.compareAtPrice}
                                   onChange={(e) =>
-                                    updateVariationRow(v._key, { compareAtPrice: e.target.value })
+                                    updateVariationRow(v._key, {
+                                      compareAtPrice: e.target.value,
+                                    })
                                   }
                                   placeholder="e.g. 1800"
                                   className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
@@ -1438,7 +1609,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                   type="text"
                                   value={v.barcode}
                                   onChange={(e) =>
-                                    updateVariationRow(v._key, { barcode: e.target.value })
+                                    updateVariationRow(v._key, {
+                                      barcode: e.target.value,
+                                    })
                                   }
                                   placeholder="Scan or type"
                                   className="w-full border border-gray-300 px-2.5 py-1.5 text-sm rounded focus:outline-none focus:border-green-500"
@@ -1461,7 +1634,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                 type="checkbox"
                                 checked={v.dedicatedStock}
                                 onChange={(e) =>
-                                  updateVariationRow(v._key, { dedicatedStock: e.target.checked })
+                                  updateVariationRow(v._key, {
+                                    dedicatedStock: e.target.checked,
+                                  })
                                 }
                               />
                               Dedicated stock
@@ -1473,7 +1648,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                 min="0"
                                 value={v.stockQuantity}
                                 onChange={(e) =>
-                                  updateVariationRow(v._key, { stockQuantity: e.target.value })
+                                  updateVariationRow(v._key, {
+                                    stockQuantity: e.target.value,
+                                  })
                                 }
                                 placeholder="Packs in stock"
                                 className="w-28 border border-gray-300 px-2 py-1 text-xs rounded focus:outline-none focus:border-green-500"
@@ -1493,7 +1670,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                                 type="checkbox"
                                 checked={v.isActive}
                                 onChange={(e) =>
-                                  updateVariationRow(v._key, { isActive: e.target.checked })
+                                  updateVariationRow(v._key, {
+                                    isActive: e.target.checked,
+                                  })
                                 }
                               />
                               Active
@@ -1527,27 +1706,46 @@ export default function ProductForm({ productId, onSave }: Props) {
                         : `Customer uses +/− buttons stepping by ${form.scaleStep || "0.1"} ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}, or taps a preset.`}
                     </li>
                     <li>
-                      <strong>Stock:</strong> Use the Inventory tab to track total available {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}s in stock.
+                      <strong>Stock:</strong> Use the Inventory tab to track
+                      total available{" "}
+                      {form.scaleUnit === "custom"
+                        ? form.scaleUnitCustom || "unit"
+                        : form.scaleUnit}
+                      s in stock.
                     </li>
                   </ul>
                 </div>
 
                 {/* Live stock-sync warning */}
-                {form.trackInventory && form.stockQuantity > 0 && form.maxOrderQty && parseFloat(form.maxOrderQty) > form.stockQuantity && (
-                  <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-xs text-red-800">
-                    ⚠️ <strong>Stock sync issue:</strong> Maximum order ({form.maxOrderQty} {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}) exceeds available stock ({form.stockQuantity} units). Either reduce the maximum order or increase stock in the Inventory tab.
-                  </div>
-                )}
+                {form.trackInventory &&
+                  form.stockQuantity > 0 &&
+                  form.maxOrderQty &&
+                  parseFloat(form.maxOrderQty) > form.stockQuantity && (
+                    <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-xs text-red-800">
+                      ⚠️ <strong>Stock sync issue:</strong> Maximum order (
+                      {form.maxOrderQty}{" "}
+                      {form.scaleUnit === "custom"
+                        ? form.scaleUnitCustom || "unit"
+                        : form.scaleUnit}
+                      ) exceeds available stock ({form.stockQuantity} units).
+                      Either reduce the maximum order or increase stock in the
+                      Inventory tab.
+                    </div>
+                  )}
 
                 {/* Live min > step warning */}
-                {form.minOrderQty && form.scaleStep &&
+                {form.minOrderQty &&
+                  form.scaleStep &&
                   parseFloat(form.minOrderQty) > 0 &&
                   parseFloat(form.scaleStep) > 0 &&
                   parseFloat(form.minOrderQty) < parseFloat(form.scaleStep) && (
-                  <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 text-xs text-orange-800">
-                    ⚠️ <strong>Step warning:</strong> Minimum order ({form.minOrderQty}) is less than scale step ({form.scaleStep}). The first +/− press will exceed the minimum. Consider setting minimum = step.
-                  </div>
-                )}
+                    <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 text-xs text-orange-800">
+                      ⚠️ <strong>Step warning:</strong> Minimum order (
+                      {form.minOrderQty}) is less than scale step (
+                      {form.scaleStep}). The first +/− press will exceed the
+                      minimum. Consider setting minimum = step.
+                    </div>
+                  )}
 
                 {/* Negative value warnings */}
                 {form.minOrderQty && parseFloat(form.minOrderQty) < 0 && (
@@ -1567,7 +1765,9 @@ export default function ProductForm({ productId, onSave }: Props) {
                 )}
                 {parseFloat(form.scaleStep) === 0 && !form.scalePresets && (
                   <div className="bg-red-50 border border-red-300 rounded-xl p-3 text-xs text-red-800">
-                    ⚠️ Scale Step is 0 (preset-only mode) — you must add at least one Preset Weight above before this product can be saved.
+                    ⚠️ Scale Step is 0 (preset-only mode) — you must add at
+                    least one Preset Weight above before this product can be
+                    saved.
                   </div>
                 )}
               </div>
@@ -1575,7 +1775,6 @@ export default function ProductForm({ productId, onSave }: Props) {
           </div>
         </div>
       )}
-
 
       {activeTab === "grocery" && (
         <div className="space-y-5">
@@ -1763,18 +1962,32 @@ export default function ProductForm({ productId, onSave }: Props) {
           {form.isScalable && (
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800">
               <p className="font-semibold mb-1">
-                📦 Scalable product — stock in {form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s
+                📦 Scalable product — stock in{" "}
+                {form.scaleUnit === "custom"
+                  ? form.scaleUnitCustom || "units"
+                  : form.scaleUnit}
+                s
               </p>
               <p>
-                Enter the total available <strong>{form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s</strong> in stock.
-                E.g. if you have 10 kg of meat, enter <strong>10</strong>.
-                POS and online store will block orders that exceed this amount.
+                Enter the total available{" "}
+                <strong>
+                  {form.scaleUnit === "custom"
+                    ? form.scaleUnitCustom || "units"
+                    : form.scaleUnit}
+                  s
+                </strong>{" "}
+                in stock. E.g. if you have 10 kg of meat, enter{" "}
+                <strong>10</strong>. POS and online store will block orders that
+                exceed this amount.
               </p>
-              {form.trackInventory && form.maxOrderQty && parseFloat(form.maxOrderQty) > form.stockQuantity && (
-                <p className="mt-1.5 text-red-700 font-semibold">
-                  ⚠️ Stock ({form.stockQuantity}) is less than max order limit ({form.maxOrderQty}). Increase stock or reduce max order.
-                </p>
-              )}
+              {form.trackInventory &&
+                form.maxOrderQty &&
+                parseFloat(form.maxOrderQty) > form.stockQuantity && (
+                  <p className="mt-1.5 text-red-700 font-semibold">
+                    ⚠️ Stock ({form.stockQuantity}) is less than max order limit
+                    ({form.maxOrderQty}). Increase stock or reduce max order.
+                  </p>
+                )}
             </div>
           )}
 
@@ -1782,21 +1995,26 @@ export default function ProductForm({ productId, onSave }: Props) {
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
               <span className="text-amber-500 mt-0.5">⚠️</span>
               <span>
-                Stock quantity changes require admin approval. Your request will be reviewed before the stock is updated.
+                Stock quantity changes require admin approval. Your request will
+                be reviewed before the stock is updated.
               </span>
             </div>
           )}
           <div className="grid grid-cols-2 gap-4">
             <Input
-              label={form.isScalable
-                ? `Stock (${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s available)`
-                : "Stock Quantity"}
+              label={
+                form.isScalable
+                  ? `Stock (${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s available)`
+                  : "Stock Quantity"
+              }
               type="number"
               value={form.stockQuantity}
               onChange={(v) => setField("stockQuantity", Number(v))}
-              hint={form.isScalable
-                ? `Total ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s on hand (e.g. 10)`
-                : undefined}
+              hint={
+                form.isScalable
+                  ? `Total ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s on hand (e.g. 10)`
+                  : undefined
+              }
             />
             <Input
               label="Low Stock Alert Threshold"
@@ -1836,19 +2054,34 @@ export default function ProductForm({ productId, onSave }: Props) {
           {/* Scalable weight context banner */}
           {form.isScalable && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800">
-              <p className="font-semibold mb-1">📦 Scalable product — shipping weight note</p>
+              <p className="font-semibold mb-1">
+                📦 Scalable product — shipping weight note
+              </p>
               {["kg", "g", "lb"].includes(form.scaleUnit) ? (
                 <p>
-                  This product is sold by <strong>{form.scaleUnit}</strong>. Enter the shipping weight
-                  per <strong>1 {form.scaleUnit}</strong> ordered (usually <strong>1 kg</strong> for
-                  kg-sold items). The system will multiply by the ordered quantity to get the total
-                  shipment weight.
+                  This product is sold by <strong>{form.scaleUnit}</strong>.
+                  Enter the shipping weight per{" "}
+                  <strong>1 {form.scaleUnit}</strong> ordered (usually{" "}
+                  <strong>1 kg</strong> for kg-sold items). The system will
+                  multiply by the ordered quantity to get the total shipment
+                  weight.
                 </p>
               ) : (
                 <p>
-                  This product is sold by <strong>{form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}</strong>.
-                  Enter the estimated shipping weight in kg per <strong>1 {form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit}</strong> so
-                  delivery costs can be calculated correctly.
+                  This product is sold by{" "}
+                  <strong>
+                    {form.scaleUnit === "custom"
+                      ? form.scaleUnitCustom || "unit"
+                      : form.scaleUnit}
+                  </strong>
+                  . Enter the estimated shipping weight in kg per{" "}
+                  <strong>
+                    1{" "}
+                    {form.scaleUnit === "custom"
+                      ? form.scaleUnitCustom || "unit"
+                      : form.scaleUnit}
+                  </strong>{" "}
+                  so delivery costs can be calculated correctly.
                 </p>
               )}
             </div>
@@ -1865,13 +2098,17 @@ export default function ProductForm({ productId, onSave }: Props) {
               type="number"
               value={form.weight}
               onChange={(v) => setField("weight", v)}
-              placeholder={["kg", "g", "lb"].includes(form.scaleUnit) && form.isScalable ? "1" : "0.5"}
+              placeholder={
+                ["kg", "g", "lb"].includes(form.scaleUnit) && form.isScalable
+                  ? "1"
+                  : "0.5"
+              }
               hint={
                 form.isScalable && ["kg", "g", "lb"].includes(form.scaleUnit)
                   ? `Shipping weight per 1 ${form.scaleUnit} ordered (e.g. 1 for 1kg items)`
                   : form.isScalable
-                  ? `Weight in kg per 1 ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit} (used in shipping calculation)`
-                  : "Required — used to calculate delivery cost"
+                    ? `Weight in kg per 1 ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit} (used in shipping calculation)`
+                    : "Required — used to calculate delivery cost"
               }
             />
             <Input

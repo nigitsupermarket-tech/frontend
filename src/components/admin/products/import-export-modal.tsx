@@ -211,7 +211,6 @@ export function ImportExportModal({
   const [importSource, setImportSource] = useState<"csv" | "scale">("csv");
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [scaleCategoryId, setScaleCategoryId] = useState("");
-  const [scaleDefaultStock, setScaleDefaultStock] = useState("10");
   // Every row this importer creates is marked as a scalable/weighed
   // product (see backend importScaleGoodsSheet) — these two just control
   // what unit and step it's scalable BY, same fields the "Add Product"
@@ -613,7 +612,6 @@ export function ImportExportModal({
       const formData = new FormData();
       formData.append("file", file);
       if (scaleCategoryId) formData.append("categoryId", scaleCategoryId);
-      formData.append("defaultStock", scaleDefaultStock || "10");
       formData.append(
         "scaleUnit",
         scaleUnit === "custom" ? scaleUnitCustom.trim() : scaleUnit,
@@ -846,13 +844,16 @@ export function ImportExportModal({
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>
                       Upload the scale's own PLU export (e.g. SCALE_GOODS.xlsx —
-                      Name, Code, Price, and optional Stock and Category
-                      columns). Every row becomes a new product: SKU, slug, and
-                      barcode are generated automatically, the barcode and Scale
-                      Ware Code are set to the sheet's Code, description gets a
-                      generic placeholder, and stock defaults to the value below
-                      when the sheet has no Stock column. Rows whose Code is
-                      already a product are skipped — safe to re-upload.
+                      Name, Code, Price, and an optional Category column). Every
+                      new row becomes a product: SKU, slug, and barcode are
+                      generated automatically, the barcode and Scale Ware Code
+                      are set to the sheet's Code, description gets a generic
+                      placeholder. New products are created with{" "}
+                      <strong>0 stock, as a Draft</strong> — not for sale until
+                      you set real stock and publish them. Rows whose Code is
+                      already a product are always skipped, stock and all — safe
+                      to re-upload the same master sheet after adding new rows
+                      to it.
                     </span>
                   </div>
 
@@ -885,22 +886,6 @@ export function ImportExportModal({
                           Category column at all. If you leave this blank too,
                           those rows land in an auto-created{" "}
                           <strong>"Scalable Products"</strong> category.
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                          Default stock
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={scaleDefaultStock}
-                          onChange={(e) => setScaleDefaultStock(e.target.value)}
-                          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm"
-                        />
-                        <p className="text-xs text-gray-400 mt-1">
-                          Used for any row without its own Stock column value.
                         </p>
                       </div>
 

@@ -33,6 +33,19 @@ const stockColors: Record<string, string> = {
   OUT_OF_STOCK: "bg-red-100 text-red-700",
 };
 
+// Same 3-way model the status filter dropdown uses — DISCONTINUED is
+// labeled "Archived" and ACTIVE is labeled "Published" everywhere a
+// product's status is shown, so the filter and the badge always agree.
+// OUT_OF_STOCK is a real ProductStatus value too, but it's driven by
+// stock level rather than an editorial choice, so it's left showing its
+// own plain label here instead of folding it into one of the three.
+const PRODUCT_STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "Published",
+  DRAFT: "Draft",
+  DISCONTINUED: "Archived",
+  OUT_OF_STOCK: "Out of Stock",
+};
+
 interface Filters {
   search: string;
   categoryId: string;
@@ -285,9 +298,9 @@ export default function AdminProductsPage() {
             className={sel}
           >
             <option value="">All Statuses</option>
-            <option value="ACTIVE">Active</option>
+            <option value="ACTIVE">Published</option>
             <option value="DRAFT">Draft</option>
-            <option value="DISCONTINUED">Discontinued</option>
+            <option value="DISCONTINUED">Archived</option>
           </select>
 
           {/* Stock Status */}
@@ -464,7 +477,8 @@ export default function AdminProductsPage() {
                               : "bg-red-100 text-red-600"
                         }`}
                       >
-                        {product.status}
+                        {PRODUCT_STATUS_LABELS[product.status] ||
+                          product.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600 font-medium">
