@@ -409,7 +409,7 @@ export default function AdminProductsPage() {
                         <Image
                           src={
                             product.images[0] ||
-                            "/images/placeholder-product.png"
+                            "/images/placeholder-product.svg"
                           }
                           alt={product.name}
                           className="w-10 h-10 rounded-lg object-cover border border-gray-100"

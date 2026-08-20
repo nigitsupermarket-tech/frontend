@@ -18,6 +18,7 @@ import {
   Twitter,
   Linkedin,
   MessageCircle,
+  LayoutDashboard,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { cn, formatPrice, getProductImage } from "@/lib/utils";
@@ -120,7 +121,11 @@ function SearchDropdown({
                   </p>
                 </div>
                 <span className="text-sm font-bold text-brand-700 shrink-0">
-                  {pricesHidden ? <PriceLock compact /> : formatPrice(product.price)}
+                  {pricesHidden ? (
+                    <PriceLock compact />
+                  ) : (
+                    formatPrice(product.price)
+                  )}
                 </span>
               </button>
             ))}
@@ -488,6 +493,17 @@ export function Header() {
               </div>
 
               <div className="flex items-center shrink-0 ml-auto gap-1">
+                {isAuthenticated && user && user.role !== "CUSTOMER" && (
+                  <Link
+                    href="/admin/dashboard"
+                    className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-gray-600 hover:text-brand-700 hover:bg-gray-50 transition-colors"
+                    aria-label="Go to admin dashboard"
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Dashboard
+                  </Link>
+                )}
+
                 <button
                   onClick={() => {
                     setMobileOpen(false);
@@ -635,6 +651,16 @@ export function Header() {
                 </Link>
               ))}
               <div className="border-t border-gray-100 mt-2 pt-2 space-y-1">
+                {isAuthenticated && user && user.role !== "CUSTOMER" && (
+                  <Link
+                    href="/admin/dashboard"
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Dashboard
+                  </Link>
+                )}
                 <Link
                   href="/wishlist"
                   className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
