@@ -1724,6 +1724,19 @@ function POSPageInner() {
     const existing = document.getElementById("pos-receipt-print-frame");
     if (existing) existing.remove();
 
+    // Prints BOTH a merchant copy and a customer copy in ONE continuous
+    // print job — same reasoning as printBothReceipts in
+    // lib/posReceipt.ts (used by the POS orders list / order-detail
+    // reprint): a real receipt printer produces one unbroken strip with
+    // a dashed tear line between copies, not two separate print jobs.
+    const copyLabel = (label: string) =>
+      `<div class="text-center" style="margin-bottom:2mm;">` +
+      `<span style="display:inline-block;border:2px solid #000;padding:1mm 3mm;letter-spacing:1px;font-weight:900;">${label}</span>` +
+      `</div>`;
+    const cutLine =
+      `<div class="text-center" style="font-size:11px;letter-spacing:2px;margin:6mm 0;">` +
+      `✂ - - - - - - - - - - - - - - - - - - - - - - - - -</div>`;
+
     const html = `
       <!DOCTYPE html><html><head>
       <style>
@@ -1748,7 +1761,7 @@ function POSPageInner() {
         .pt-1, .pt-2 { padding-top: 1mm; }
         * { letter-spacing: 0.01em; }
       </style>
-      </head><body>${el.innerHTML}</body></html>
+      </head><body>${copyLabel("MERCHANT COPY")}${el.innerHTML}${cutLine}${copyLabel("CUSTOMER COPY")}${el.innerHTML}</body></html>
     `;
 
     const blob = new Blob([html], { type: "text/html" });
@@ -1756,8 +1769,12 @@ function POSPageInner() {
 
     const iframe = document.createElement("iframe");
     iframe.id = "pos-receipt-print-frame";
+    // Generous, not exact — this is just an offscreen rendering host
+    // (position:fixed, far off-screen), not what actually controls the
+    // printed page size (that's the @page CSS above). Bumped up since the
+    // content is now two copies back to back instead of one.
     iframe.style.cssText =
-      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:297mm;border:none;";
+      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:1000mm;border:none;";
 
     const cleanup = () => {
       try {

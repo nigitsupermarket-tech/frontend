@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Plus, X, Tag, Scale, RefreshCw } from "lucide-react";
+import { ArrowLeft, Loader2, Plus, X, Tag, Scale, RefreshCw, AlertTriangle } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -462,11 +462,24 @@ export default function ProductForm({ productId, onSave }: Props) {
     // For all other products, weight is the fixed shipping weight per item.
     const weightBasedUnits = ["kg", "g", "lb"];
     const isWeightBased = form.isScalable && weightBasedUnits.includes(form.scaleUnit);
-    if (!form.weight) {
+    // `effectiveWeight` (not form.weight directly) is what actually gets
+    // saved below — setField("weight", ...) queues a state update for the
+    // NEXT render, it does not change `form.weight` within this same
+    // synchronous call. Building the payload from form.weight directly
+    // here used to silently save weight as empty on this exact save (the
+    // one meant to auto-fill it), requiring a second, separate save
+    // before it actually stuck — which is exactly the kind of "I edited
+    // this product but the change isn't showing" symptom that was
+    // reported for scale-imported products (they all start with no
+    // weight set at all, so every one of them hit this on its first
+    // edit).
+    let effectiveWeight = form.weight;
+    if (!effectiveWeight) {
       if (isWeightBased) {
         // For kg/g/lb scalable products auto-fill weight = 1 (1 kg per 1 kg ordered)
         // Only block if genuinely empty and not auto-derivable
-        setField("weight", "1");
+        effectiveWeight = "1";
+        setField("weight", "1"); // keeps the Shipping tab in sync on next render
       } else {
         toast.error(
           form.isScalable
@@ -698,7 +711,7 @@ export default function ProductForm({ productId, onSave }: Props) {
             ? new Date(form.promotionEndsAt).toISOString()
             : null,
           status: form.status,
-          weight: form.weight ? parseFloat(form.weight) : undefined,
+          weight: effectiveWeight ? parseFloat(effectiveWeight) : undefined,
           length: form.length ? parseFloat(form.length) : undefined,
           width: form.width ? parseFloat(form.width) : undefined,
           height: form.height ? parseFloat(form.height) : undefined,
@@ -1829,6 +1842,17 @@ export default function ProductForm({ productId, onSave }: Props) {
               onChange={(v) => setField("trackInventory", v)}
               description="Automatically deduct stock on orders"
             />
+            {form.isScalable && !form.trackInventory && (
+              <div className="flex gap-2 items-start px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  This is a scale/weight product with inventory tracking off —
+                  sales for it will complete and print a normal receipt, but
+                  stock won't move at all. That's almost never what's wanted
+                  for a physical, weighed good.
+                </span>
+              </div>
+            )}
             <Checkbox
               label="Allow Backorders"
               checked={form.allowBackorder}

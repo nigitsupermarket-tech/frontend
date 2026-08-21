@@ -61,15 +61,17 @@ export function buildOnlineInvoiceHtml(
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <style>
-      /* size: 80mm 297mm — NOT "80mm auto". A real thermal printer's
-         continuous-roll driver handles "auto" height fine, but Chrome's
-         "Print to PDF"/"Save as PDF" destination is a fixed-page renderer
-         with no roll-paper concept — asking it to paginate an undefined
-         height can hang the print-preview generator indefinitely ("Loading
-         preview…" that never resolves). A generously tall FIXED height
-         works on both: real thermal printers still cut at the natural end
-         of content, and Print-to-PDF can paginate normally. */
-      @page { size: 80mm 297mm; margin: 0; }
+      /* size: 80mm auto — genuinely unbounded height, growing to fit
+         however much content is actually there, same as a real thermal
+         printer's continuous roll. This used to be a flat, hard-coded
+         297mm on the theory that "auto" could hang Chrome's print-preview
+         pagination on a fixed-page virtual destination like "Print to
+         PDF" — but the actually-reproduced bug in production was the
+         opposite: any invoice whose real content ran past 297mm just got
+         cut off entirely, with no second page or overflow handling at
+         all. See the identical fix (and fuller rationale) in
+         lib/posReceipt.ts's receiptStyleBlock(). */
+      @page { size: 80mm auto; margin: 0; }
       * { box-sizing: border-box; }
       body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
              width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;

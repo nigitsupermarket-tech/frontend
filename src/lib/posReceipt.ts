@@ -18,7 +18,6 @@ import {
   downloadReceiptPdf,
   wrapText,
   money as pdfMoney,
-  estimateHeightMm,
 } from "./receiptPdf";
 import { formatScaleQty } from "./utils";
 
@@ -68,7 +67,11 @@ export interface POSOrder {
 // ── Receipt HTML builder ──────────────────────────────────────────────────────
 // `copyLabel`: shown at the bottom of the receipt so cashiers can tell the
 // customer's copy apart from the in-house (merchant) copy at a glance.
-export function buildReceiptHtml(
+// Builds just the printable body content for ONE copy — no <!DOCTYPE>,
+// <html>, <head>, or <style>. Shared by both buildReceiptHtml (single
+// copy) and buildBothReceiptsHtml (continuous customer+merchant copy in
+// one print job) below, so the two can never visually drift apart.
+function buildReceiptBody(
   order: POSOrder,
   copyLabel: "CUSTOMER COPY" | "MERCHANT COPY",
 ): string {
@@ -97,34 +100,54 @@ export function buildReceiptHtml(
     })
     .join("");
 
-  // The @page height must be a real fixed number (not "auto" — see the
-  // note below), but it also can't be a flat constant: an order with a
-  // dozen+ items, like a real busy receipt, needs far more room than a
-  // short one does, or the tail end gets cut off entirely. Reuse the exact
-  // same line-by-line height estimate already used for the PDF download
-  // path (buildReceiptPdfLines + estimateHeightMm), so both outputs size
-  // the page the same way from one shared source of truth. A little extra
-  // padding accounts for this being an HTML/CSS layout rather than the
-  // PDF's own font-metrics-based line boxes — the two aren't pixel
-  // identical, and it's much safer to run slightly long than to cut off
-  // real content.
-  const heightMm = Math.max(
-    120,
-    estimateHeightMm(buildReceiptPdfLines(order, copyLabel)) + 15,
-  );
+  return `
+    <div class="c" style="font-size:16px;"><strong>NigitTriple Supermarket</strong></div>
+    <div class="c"><strong>30, Abuloma Road (Bozgomero Estate)</strong></div>
+    <div class="c"><strong>Port Harcourt · +234 916 977 6138</strong></div>
+    <hr/>
+    <div class="c"><strong>${order.receiptNumber}</strong></div>
+    <div class="c"><strong>${new Date(order.createdAt).toLocaleString("en-NG")}</strong></div>
+    ${order.customerName ? `<div class="c"><strong>Customer: ${order.customerName}</strong></div>` : ""}
+    <div class="c"><strong>Staff: ${order.processedBy?.name || "—"}</strong></div>
+    <hr/>
+    <table>
+      <colgroup><col style="width:45%"/><col style="width:30%"/><col style="width:25%"/></colgroup>
+      <tbody>${itemsHtml}</tbody>
+    </table>
+    <hr/>
+    <table>
+      ${order.discountAmount > 0 ? `<tr><td><strong>Discount</strong></td><td class="r"><strong>-&#8358;${order.discountAmount.toLocaleString()}</strong></td></tr>` : ""}
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td class="r"><strong>&#8358;${order.total.toLocaleString()}</strong></td></tr>
+      <tr><td><strong>Payment</strong></td><td class="r"><strong>${order.paymentMethod}</strong></td></tr>
+      ${order.amountTendered ? `<tr><td><strong>Tendered</strong></td><td class="r"><strong>&#8358;${order.amountTendered.toLocaleString()}</strong></td></tr>` : ""}
+      ${order.changeGiven && order.changeGiven > 0 ? `<tr><td><strong>Change</strong></td><td class="r"><strong>&#8358;${order.changeGiven.toLocaleString()}</strong></td></tr>` : ""}
+    </table>
+    <hr/>
+    <div class="c"><span class="copy-tag">${copyLabel}</span></div>
+    <hr/>
+    <div class="c" style="font-size:10px;"><strong>Software by Calstins Ltd · calstins.com</strong></div>
+  `;
+}
 
-
-  return `<!DOCTYPE html><html><head>
-    <meta charset="utf-8"/>
-    <style>
-      /* size: 80mm ${heightMm}mm — NOT "80mm auto". See printOnlineInvoice.ts
-         for the full explanation: "auto" height can hang Chrome's
-         print-preview pagination on fixed-page destinations like Print to
-         PDF, even though it works fine on a real thermal printer's
-         roll-paper driver. A fixed height works on both — it just has to
-         be computed per-receipt (above) rather than one constant, or a
-         long order gets cut off. */
-      @page { size: 80mm ${heightMm}mm; margin: 2mm 0; }
+// Shared <head>/<style> for every printed receipt document below.
+//
+// @page uses `size: 80mm auto` — height genuinely UNBOUNDED, growing to
+// fit however much content is actually there, exactly like a real
+// thermal printer's continuous roll. This used to be a computed FIXED
+// height (estimateHeightMm(...) + padding) because "auto" was believed to
+// hang Chrome's print-preview pagination on fixed-page virtual
+// destinations like "Microsoft Print to PDF" — but the actual, reliably
+// reproduced bug in production was the opposite problem: any order whose
+// real content ran longer than that ESTIMATE overflowed onto a second
+// printed page, with the browser's own pagination visibly splitting it
+// (page "1/2" footers) and — on some printer drivers — triggering a
+// scale-to-fit shrink that made the text thin and faded. A long order is
+// common, not an edge case, so a height that has to be pre-guessed is the
+// wrong approach entirely; `auto` is the standard, correct pattern for
+// continuous-roll thermal printing and has no such ceiling to overflow.
+function receiptStyleBlock(): string {
+  return `
+      @page { size: 80mm auto; margin: 2mm 0; }
       * { 
         box-sizing: border-box; 
         margin: 0; 
@@ -156,33 +179,47 @@ export function buildReceiptHtml(
         margin-top: 2mm;
         letter-spacing: 1px;
       }
-    </style>
-  </head><body>
-    <div class="c" style="font-size:16px;"><strong>NigitTriple Supermarket</strong></div>
-    <div class="c"><strong>30, Abuloma Road (Bozgomero Estate)</strong></div>
-    <div class="c"><strong>Port Harcourt · +234 916 977 6138</strong></div>
-    <hr/>
-    <div class="c"><strong>${order.receiptNumber}</strong></div>
-    <div class="c"><strong>${new Date(order.createdAt).toLocaleString("en-NG")}</strong></div>
-    ${order.customerName ? `<div class="c"><strong>Customer: ${order.customerName}</strong></div>` : ""}
-    <div class="c"><strong>Staff: ${order.processedBy?.name || "—"}</strong></div>
-    <hr/>
-    <table>
-      <colgroup><col style="width:45%"/><col style="width:30%"/><col style="width:25%"/></colgroup>
-      <tbody>${itemsHtml}</tbody>
-    </table>
-    <hr/>
-    <table>
-      ${order.discountAmount > 0 ? `<tr><td><strong>Discount</strong></td><td class="r"><strong>-&#8358;${order.discountAmount.toLocaleString()}</strong></td></tr>` : ""}
-      <tr class="total-row"><td><strong>TOTAL</strong></td><td class="r"><strong>&#8358;${order.total.toLocaleString()}</strong></td></tr>
-      <tr><td><strong>Payment</strong></td><td class="r"><strong>${order.paymentMethod}</strong></td></tr>
-      ${order.amountTendered ? `<tr><td><strong>Tendered</strong></td><td class="r"><strong>&#8358;${order.amountTendered.toLocaleString()}</strong></td></tr>` : ""}
-      ${order.changeGiven && order.changeGiven > 0 ? `<tr><td><strong>Change</strong></td><td class="r"><strong>&#8358;${order.changeGiven.toLocaleString()}</strong></td></tr>` : ""}
-    </table>
-    <hr/>
-    <div class="c"><span class="copy-tag">${copyLabel}</span></div>
-    <hr/>
-    <div class="c" style="font-size:10px;"><strong>Software by Calstins Ltd · calstins.com</strong></div>
+      .cut-line {
+        text-align: center;
+        font-size: 11px;
+        letter-spacing: 2px;
+        margin: 6mm 0;
+        -webkit-text-stroke: none;
+      }
+  `;
+}
+
+// Single-copy document — still used by anything that only ever needs one
+// copy at a time (kept for compatibility; printBothReceipts below is what
+// the actual "Print" buttons call).
+export function buildReceiptHtml(
+  order: POSOrder,
+  copyLabel: "CUSTOMER COPY" | "MERCHANT COPY",
+): string {
+  return `<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <style>${receiptStyleBlock()}</style>
+  </head><body>${buildReceiptBody(order, copyLabel)}</body></html>`;
+}
+
+// ── Both copies, ONE continuous print job ───────────────────────────────
+// Real POS receipt printers on continuous roll paper print a merchant
+// copy immediately followed by a customer copy (or vice versa) as ONE
+// unbroken strip, with a perforation or a plain dashed "cut here" line
+// between them for the cashier to tear apart by hand — never two
+// separate print jobs. Two separate jobs means two separate OS print
+// dialogs/spooler entries and, depending on the printer driver, a paper
+// cut or feed gap between them that a plain thermal roll doesn't actually
+// have. This builds ONE document containing both copies back to back —
+// see printBothReceipts further down, which now calls this once instead
+// of opening two windows and calling print() twice.
+export function buildBothReceiptsHtml(order: POSOrder): string {
+  return `<!DOCTYPE html><html><head>
+    <meta charset="utf-8"/>
+    <style>${receiptStyleBlock()}</style>
+  </head><body>${buildReceiptBody(order, "MERCHANT COPY")}
+    <div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+    ${buildReceiptBody(order, "CUSTOMER COPY")}
   </body></html>`;
 }
 
@@ -426,27 +463,23 @@ function queuePrint(win: Window, onDone?: () => void) {
   runNextPrintJob();
 }
 
-// ── Print BOTH copies: customer copy first, then merchant (in-house) copy ────
-// Both windows are opened synchronously, right here, in direct response to
-// the click that called this — see the popup-blocker note above for why
-// that matters. Only the actual print()/close() sequencing is deferred.
+// ── Print BOTH copies as ONE continuous print job ───────────────────────
+// Used to open two separate popup windows and call print() twice in
+// sequence — which meant two separate OS print dialogs/spooler jobs, and
+// (depending on the printer driver) an unwanted paper cut or feed gap
+// between them. Now a single window with buildBothReceiptsHtml's combined
+// document — one print() call, one continuous strip of paper with a
+// dashed "cut here" line the cashier tears by hand, matching how a real
+// receipt printer actually produces a merchant + customer copy pair.
 export function printBothReceipts(order: POSOrder, onAllDone?: () => void) {
-  const customerWin = openPrintWindow(buildReceiptHtml(order, "CUSTOMER COPY"));
-  const merchantWin = openPrintWindow(buildReceiptHtml(order, "MERCHANT COPY"));
-  if (!customerWin || !merchantWin) {
+  const win = openPrintWindow(buildBothReceiptsHtml(order));
+  if (!win) {
     console.error(
-      "[posReceipt] Print windows were blocked by the browser's popup blocker. " +
+      "[posReceipt] Print window was blocked by the browser's popup blocker. " +
         "Please allow popups for this site, or use the Download button instead.",
     );
-    customerWin?.close();
-    merchantWin?.close();
     onAllDone?.();
     return;
   }
-  queuePrint(customerWin, () => {
-    // Small delay so the OS print spooler/dialog has fully cleared
-    setTimeout(() => {
-      queuePrint(merchantWin, onAllDone);
-    }, 600);
-  });
+  queuePrint(win, onAllDone);
 }
