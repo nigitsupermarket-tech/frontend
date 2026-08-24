@@ -310,19 +310,46 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
 
   // Load pending stock approval count — Admin only now sees the queue at all.
-  useEffect(() => {
+  const fetchPendingCount = () => {
     if (role !== "ADMIN") return;
     apiGet<any>("/stock-approvals/pending-count")
       .then((r) => setPendingCount(r.data?.count || 0))
       .catch(() => {});
-  }, [role]);
-
-  // Load pending void-request count — Admin only.
-  useEffect(() => {
+  };
+  const fetchPendingVoidCount = () => {
     if (role !== "ADMIN") return;
     apiGet<any>("/pos/void-requests/pending-count")
       .then((r) => setPendingVoidCount(r.data?.count || 0))
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchPendingCount();
+    fetchPendingVoidCount();
+  }, [role]);
+
+  // These badges used to only fetch once on mount — approving/rejecting a
+  // request on the Stock Approvals or Void Requests page updated that
+  // page's own list immediately, but the sidebar (a persistent layout
+  // component, not remounted on navigation) never found out, so the
+  // badge count only ever changed on a full page reload. Two
+  // complementary fixes: an instant same-tab refresh via a custom event
+  // those pages dispatch right after a successful approve/reject/bulk
+  // action (see stock-approvals/page.tsx and pos/void-requests/page.tsx),
+  // plus a light poll as a safety net for changes made in another tab or
+  // by another staff member's session.
+  useEffect(() => {
+    if (role !== "ADMIN") return;
+    const onChange = () => {
+      fetchPendingCount();
+      fetchPendingVoidCount();
+    };
+    window.addEventListener("pending-counts:refresh", onChange);
+    const interval = setInterval(onChange, 30_000);
+    return () => {
+      window.removeEventListener("pending-counts:refresh", onChange);
+      clearInterval(interval);
+    };
   }, [role]);
 
   // Filter by role

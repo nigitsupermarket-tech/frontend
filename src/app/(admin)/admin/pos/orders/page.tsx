@@ -16,6 +16,7 @@ import {
   CreditCard,
   ArrowRightLeft,
   Monitor,
+  X,
 } from "lucide-react";
 import { apiGet, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -24,6 +25,7 @@ import {
   type POSOrder,
   printBothReceipts,
   downloadPosReceiptPdf,
+  buildBothReceiptsHtml,
 } from "@/lib/posReceipt";
 
 interface DayStats {
@@ -61,11 +63,25 @@ export default function POSOrdersPage() {
   // Guards against spam-clicking Print: tracks which order is currently
   // printing so its button can be disabled until the job finishes.
   const [printingOrderId, setPrintingOrderId] = useState<string | null>(null);
+  // Preview-before-print modal — same idea as the live checkout page's
+  // "Payment Successful" screen (you see the actual receipt before
+  // anything gets sent to a printer), previously missing here entirely:
+  // clicking Print on this list went straight to the popup-window print
+  // flow with no way to see what was about to print first.
+  const [previewOrder, setPreviewOrder] = useState<POSOrder | null>(null);
 
   const handlePrint = (order: POSOrder) => {
     if (printingOrderId) return; // already printing something — ignore extra clicks
     setPrintingOrderId(order.id);
-    printBothReceipts(order, () => setPrintingOrderId(null));
+    printBothReceipts(
+      order,
+      () => setPrintingOrderId(null),
+      (message) => toast(message, "error"),
+    );
+  };
+
+  const handleDownload = (order: POSOrder) => {
+    downloadPosReceiptPdf(order, (message) => toast(message, "error"));
   };
 
   const fetchOrders = useCallback(async () => {
@@ -309,20 +325,15 @@ export default function POSOrdersPage() {
                           </Link>
                           <button
                             type="button"
-                            onClick={() => handlePrint(order)}
-                            disabled={printingOrderId === order.id}
-                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="Print receipt (customer + merchant copy)"
+                            onClick={() => setPreviewOrder(order)}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                            title="Preview receipt before printing"
                           >
-                            {printingOrderId === order.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Printer className="w-4 h-4" />
-                            )}
+                            <Printer className="w-4 h-4" />
                           </button>
                           <button
                             type="button"
-                            onClick={() => downloadPosReceiptPdf(order)}
+                            onClick={() => handleDownload(order)}
                             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
                             title="Download both copies as PDF (customer + merchant)"
                           >
@@ -365,6 +376,73 @@ export default function POSOrdersPage() {
           </>
         )}
       </div>
+
+      {/* ── Print preview modal ── same idea as the live checkout page's
+          "Payment Successful" screen: see the actual receipt before
+          anything gets sent to a printer, instead of Print going straight
+          to the popup-window flow with no confirmation. The iframe uses
+          the EXACT same buildBothReceiptsHtml() the real print job uses,
+          so this is a true "what you see is what prints" preview, not a
+          separate re-implementation that could drift out of sync with it.
+          Scrollable for a long order — no pagination here either, same as
+          the actual print output. */}
+      {previewOrder && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="font-semibold text-gray-900">Receipt Preview</h3>
+                <p className="text-xs text-gray-400">
+                  {previewOrder.receiptNumber} — merchant + customer copy
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewOrder(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-gray-50 p-3">
+              <iframe
+                title="Receipt preview"
+                srcDoc={buildBothReceiptsHtml(previewOrder)}
+                className="w-full bg-white rounded-lg border border-gray-200"
+                style={{ height: "60vh" }}
+              />
+            </div>
+
+            <div className="flex gap-2 px-5 py-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => handleDownload(previewOrder)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Download PDF
+              </button>
+              <button
+                type="button"
+                disabled={printingOrderId === previewOrder.id}
+                onClick={() => {
+                  const order = previewOrder;
+                  handlePrint(order);
+                  setPreviewOrder(null);
+                }}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {printingOrderId === previewOrder.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Printer className="w-4 h-4" />
+                )}
+                Print
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

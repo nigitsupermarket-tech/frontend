@@ -91,6 +91,10 @@ export default function VoidRequestsPage() {
       });
       toast("Void approved — order voided and stock restored", "success");
       fetchRequests();
+      // See sidebar.tsx's listener — same fix as stock-approvals, this
+      // was the identical "badge doesn't update without a full refresh"
+      // bug for void requests too.
+      window.dispatchEvent(new Event("pending-counts:refresh"));
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -106,6 +110,7 @@ export default function VoidRequestsPage() {
       });
       toast("Void request rejected", "success");
       fetchRequests();
+      window.dispatchEvent(new Event("pending-counts:refresh"));
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {

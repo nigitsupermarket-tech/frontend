@@ -142,6 +142,11 @@ export default function StockApprovalsPage() {
       toast("Approved and stock updated", "success");
       setReviewNote("");
       fetchRequests(filters);
+      // Sidebar's pending-count badge only fetches once on mount — this
+      // tells it something changed so the badge updates immediately
+      // instead of needing a full page refresh. See sidebar.tsx's
+      // listener for the other half of this.
+      window.dispatchEvent(new Event("pending-counts:refresh"));
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -158,6 +163,7 @@ export default function StockApprovalsPage() {
       toast("Request rejected", "success");
       setReviewNote("");
       fetchRequests(filters);
+      window.dispatchEvent(new Event("pending-counts:refresh"));
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -177,6 +183,7 @@ export default function StockApprovalsPage() {
       toast(res.message || `${selected.size} approved`, "success");
       setReviewNote("");
       fetchRequests(filters);
+      window.dispatchEvent(new Event("pending-counts:refresh"));
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {

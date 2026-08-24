@@ -148,6 +148,7 @@ function buildReceiptBody(
 function receiptStyleBlock(): string {
   return `
       @page { size: 80mm auto; margin: 2mm 0; }
+      html { zoom: 1 !important; }
       * { 
         box-sizing: border-box; 
         margin: 0; 
@@ -160,6 +161,7 @@ function receiptStyleBlock(): string {
         font-family: 'Courier New', Courier, monospace; 
         font-size: 13px; /* Slightly bumped up for better receipt clarity */
         width: 76mm; 
+        max-width: 76mm;
         margin: 0 auto; 
         line-height: 1.5; 
       }
@@ -324,16 +326,42 @@ function buildReceiptPdfLines(
 // downloads folder. A tiny stagger between the two saves avoids some
 // browsers' "this site is trying to download multiple files" throttling
 // that can silently drop the second one if triggered in the same tick.
-export function downloadPosReceiptPdf(order: POSOrder) {
-  downloadReceiptPdf(
-    buildReceiptPdfLines(order, "CUSTOMER COPY"),
-    `Receipt-${order.receiptNumber}-CustomerCopy.pdf`,
-  );
-  setTimeout(() => {
+//
+// `onError` is optional and UI-framework-agnostic on purpose (this file
+// has no toast/store access) — callers wire it to their own toast. Before
+// this, a failure ANYWHERE in the chain (a busy download permission
+// prompt, a jsPDF internal error, anything) failed completely silently:
+// no toast, no console-visible feedback, nothing — "does not download"
+// with zero way to tell why. Every failure now at least surfaces
+// something actionable instead of just... nothing happening.
+export function downloadPosReceiptPdf(
+  order: POSOrder,
+  onError?: (message: string) => void,
+) {
+  try {
     downloadReceiptPdf(
-      buildReceiptPdfLines(order, "MERCHANT COPY"),
-      `Receipt-${order.receiptNumber}-MerchantCopy.pdf`,
+      buildReceiptPdfLines(order, "CUSTOMER COPY"),
+      `Receipt-${order.receiptNumber}-CustomerCopy.pdf`,
     );
+  } catch (err) {
+    console.error("[posReceipt] Customer copy PDF download failed:", err);
+    onError?.(
+      "Couldn't generate the customer copy PDF. Try the Print button instead, or check the browser console for details.",
+    );
+    return; // don't attempt the merchant copy if the first one already failed
+  }
+  setTimeout(() => {
+    try {
+      downloadReceiptPdf(
+        buildReceiptPdfLines(order, "MERCHANT COPY"),
+        `Receipt-${order.receiptNumber}-MerchantCopy.pdf`,
+      );
+    } catch (err) {
+      console.error("[posReceipt] Merchant copy PDF download failed:", err);
+      onError?.(
+        "Customer copy downloaded, but the merchant copy PDF failed to generate.",
+      );
+    }
   }, 400);
 }
 
@@ -471,13 +499,17 @@ function queuePrint(win: Window, onDone?: () => void) {
 // document — one print() call, one continuous strip of paper with a
 // dashed "cut here" line the cashier tears by hand, matching how a real
 // receipt printer actually produces a merchant + customer copy pair.
-export function printBothReceipts(order: POSOrder, onAllDone?: () => void) {
+export function printBothReceipts(
+  order: POSOrder,
+  onAllDone?: () => void,
+  onError?: (message: string) => void,
+) {
   const win = openPrintWindow(buildBothReceiptsHtml(order));
   if (!win) {
-    console.error(
-      "[posReceipt] Print window was blocked by the browser's popup blocker. " +
-        "Please allow popups for this site, or use the Download button instead.",
-    );
+    const message =
+      "Print window was blocked by the browser's popup blocker. Please allow popups for this site, or use the Download button instead.";
+    console.error(`[posReceipt] ${message}`);
+    onError?.(message);
     onAllDone?.();
     return;
   }

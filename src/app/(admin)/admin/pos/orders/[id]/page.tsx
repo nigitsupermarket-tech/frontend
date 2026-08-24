@@ -43,6 +43,7 @@ import {
   ShieldAlert,
   Clock,
   CheckCircle2,
+  X,
 } from "lucide-react";
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
@@ -53,6 +54,7 @@ import {
   type POSOrder,
   printBothReceipts,
   downloadPosReceiptPdf,
+  buildBothReceiptsHtml,
 } from "@/lib/posReceipt";
 
 const FETCH_TIMEOUT_MS = 12_000;
@@ -88,6 +90,11 @@ export default function POSOrderDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
+  // Preview-before-print modal — same idea as the live checkout page's
+  // "Payment Successful" screen and the orders list's own preview: see
+  // the actual receipt (with the copy labels, cut-line, everything the
+  // real print job renders) before it goes to a printer.
+  const [showPreview, setShowPreview] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
   const [voidRequest, setVoidRequest] = useState<VoidRequestStatus | null>(null);
@@ -155,7 +162,16 @@ export default function POSOrderDetailPage() {
   const handlePrint = () => {
     if (!order || printing) return;
     setPrinting(true);
-    printBothReceipts(order, () => setPrinting(false));
+    printBothReceipts(
+      order,
+      () => setPrinting(false),
+      (message) => toast(message, "error"),
+    );
+  };
+
+  const handleDownload = () => {
+    if (!order) return;
+    downloadPosReceiptPdf(order, (message) => toast(message, "error"));
   };
 
   // Admin — voids the order directly and immediately.
@@ -461,27 +477,76 @@ export default function POSOrderDetailPage() {
       <div className="flex gap-3">
         <button
           type="button"
-          onClick={handlePrint}
-          disabled={printing}
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Prints the customer copy, then the merchant (in-house) copy"
+          onClick={() => setShowPreview(true)}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
+          title="Preview receipt before printing"
         >
-          {printing ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Printer className="w-4 h-4" />
-          )}{" "}
-          Print Receipts (2)
+          <Printer className="w-4 h-4" /> Preview & Print
         </button>
         <button
           type="button"
-          onClick={() => downloadPosReceiptPdf(order)}
+          onClick={handleDownload}
           className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm"
           title="Downloads both copies as PDF files (customer + merchant)"
         >
           <Download className="w-4 h-4" /> Download (2 copies)
         </button>
       </div>
+
+      {showPreview && order && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="font-semibold text-gray-900">Receipt Preview</h3>
+                <p className="text-xs text-gray-400">
+                  {order.receiptNumber} — merchant + customer copy
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto bg-gray-50 p-3">
+              <iframe
+                title="Receipt preview"
+                srcDoc={buildBothReceiptsHtml(order)}
+                className="w-full bg-white rounded-lg border border-gray-200"
+                style={{ height: "60vh" }}
+              />
+            </div>
+            <div className="flex gap-2 px-5 py-4 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Download PDF
+              </button>
+              <button
+                type="button"
+                disabled={printing}
+                onClick={() => {
+                  handlePrint();
+                  setShowPreview(false);
+                }}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {printing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Printer className="w-4 h-4" />
+                )}
+                Print
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

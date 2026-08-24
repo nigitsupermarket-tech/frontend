@@ -1741,6 +1741,7 @@ function POSPageInner() {
       <!DOCTYPE html><html><head>
       <style>
         @page { size: 80mm auto; margin: 0; }
+        html { zoom: 1 !important; }
         * { box-sizing: border-box; }
         body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
                width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;
