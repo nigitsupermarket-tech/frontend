@@ -6,7 +6,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Search,
-  Eye,
   Printer,
   Download,
   Loader2,
@@ -316,13 +315,6 @@ export default function POSOrdersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <Link
-                            href={`/admin/pos/orders/${order.id}`}
-                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors inline-block"
-                            title="View details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
                           <button
                             type="button"
                             onClick={() => setPreviewOrder(order)}
@@ -443,7 +435,6 @@ export default function POSOrdersPage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
