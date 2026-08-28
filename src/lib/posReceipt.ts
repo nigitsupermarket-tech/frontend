@@ -18,6 +18,7 @@ import {
   downloadReceiptPdf,
   wrapText,
   money as pdfMoney,
+  estimateHeightMm,
 } from "./receiptPdf";
 import { formatScaleQty } from "./utils";
 
@@ -131,23 +132,33 @@ function buildReceiptBody(
 
 // Shared <head>/<style> for every printed receipt document below.
 //
-// @page uses `size: 80mm auto` — height genuinely UNBOUNDED, growing to
-// fit however much content is actually there, exactly like a real
-// thermal printer's continuous roll. This used to be a computed FIXED
-// height (estimateHeightMm(...) + padding) because "auto" was believed to
-// hang Chrome's print-preview pagination on fixed-page virtual
-// destinations like "Microsoft Print to PDF" — but the actual, reliably
-// reproduced bug in production was the opposite problem: any order whose
-// real content ran longer than that ESTIMATE overflowed onto a second
-// printed page, with the browser's own pagination visibly splitting it
-// (page "1/2" footers) and — on some printer drivers — triggering a
-// scale-to-fit shrink that made the text thin and faded. A long order is
-// common, not an edge case, so a height that has to be pre-guessed is the
-// wrong approach entirely; `auto` is the standard, correct pattern for
-// continuous-roll thermal printing and has no such ceiling to overflow.
-function receiptStyleBlock(): string {
+// @page uses a computed FIXED height, not "auto". "auto" is the
+// standards-correct pattern for continuous-roll thermal printing and was
+// tried first — but in production, several Windows/POS thermal printer
+// drivers (this one included — see the photo that prompted this fix:
+// even a single-item receipt got physically autocut mid-content) do NOT
+// treat `size: 80mm auto` as truly unbounded. The driver falls back to
+// its own internal page-length assumption regardless of what the CSS
+// asked for, so content taller than that gets silently paginated by the
+// driver — and the printer's autocutter fires at every page break it's
+// given, landing wherever that arbitrary length happens to fall,
+// including mid-line through content.
+//
+// A FIXED, explicit height is the one thing every page-based printer
+// driver reliably honors — there's no "guess the unbounded roll length"
+// step for it to get wrong. The catch is the OLD fixed-height version of
+// this (before it was switched to "auto") used too THIN a safety margin
+// and could still fall short on a long order, which is what motivated
+// switching to "auto" in the first place. This computes the same
+// per-line estimate already used for the PDF download path
+// (estimateHeightMm + buildReceiptPdfLines — one shared source of truth
+// for both outputs) but with a much more generous margin this time: 30%
+// proportional headroom plus a flat buffer, rather than a thin flat-only
+// pad. Slightly more blank paper at the tear line is a far smaller
+// problem than the paper being autocut through actual receipt content.
+function receiptStyleBlock(heightMm: number): string {
   return `
-      @page { size: 80mm auto; margin: 2mm 0; }
+      @page { size: 80mm ${heightMm}mm; margin: 2mm 0; }
       html { zoom: 1 !important; }
       * { 
         box-sizing: border-box; 
@@ -191,6 +202,14 @@ function receiptStyleBlock(): string {
   `;
 }
 
+// Generous, explicit safety margin over the raw per-line estimate — see
+// the big comment on receiptStyleBlock for why this needs to be much more
+// forgiving than the old, thin flat-only padding that caused the
+// original under-estimation bug.
+function generousHeightMm(lines: ReceiptLine[]): number {
+  return Math.ceil(estimateHeightMm(lines) * 1.3) + 30;
+}
+
 // Single-copy document — still used by anything that only ever needs one
 // copy at a time (kept for compatibility; printBothReceipts below is what
 // the actual "Print" buttons call).
@@ -198,9 +217,10 @@ export function buildReceiptHtml(
   order: POSOrder,
   copyLabel: "CUSTOMER COPY" | "MERCHANT COPY",
 ): string {
+  const heightMm = generousHeightMm(buildReceiptPdfLines(order, copyLabel));
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
-    <style>${receiptStyleBlock()}</style>
+    <style>${receiptStyleBlock(heightMm)}</style>
   </head><body>${buildReceiptBody(order, copyLabel)}</body></html>`;
 }
 
@@ -216,9 +236,15 @@ export function buildReceiptHtml(
 // see printBothReceipts further down, which now calls this once instead
 // of opening two windows and calling print() twice.
 export function buildBothReceiptsHtml(order: POSOrder): string {
+  const merchantLines = buildReceiptPdfLines(order, "MERCHANT COPY");
+  const customerLines = buildReceiptPdfLines(order, "CUSTOMER COPY");
+  // Sum of both copies' own generous estimates, plus ~10mm for the
+  // cut-line divider between them (margin: 6mm 0 + its own text line).
+  const heightMm =
+    generousHeightMm(merchantLines) + generousHeightMm(customerLines) + 10;
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
-    <style>${receiptStyleBlock()}</style>
+    <style>${receiptStyleBlock(heightMm)}</style>
   </head><body>${buildReceiptBody(order, "MERCHANT COPY")}
     <div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - -</div>
     ${buildReceiptBody(order, "CUSTOMER COPY")}

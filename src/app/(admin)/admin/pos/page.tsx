@@ -1717,6 +1717,28 @@ function POSPageInner() {
   // attached — it "works" on the very first print of a page session by luck,
   // but `onload` never re-fires on subsequent prints, so nothing happens.
   // A Blob URL reliably fires `load` every time.
+  // Prints a merchant copy, THEN a customer copy, as TWO SEPARATE print
+  // jobs — not one combined document. This used to combine both into one
+  // continuous print job (a single "cut here" divider between them), on
+  // the theory that a real thermal printer treats it as one unbroken
+  // strip. In production, several Windows/POS thermal printer drivers
+  // don't honor an unbounded/auto page height — they fall back to their
+  // own internal page-length assumption and paginate anyway, and the
+  // printer's autocutter fires at every page break it's given, landing
+  // wherever that arbitrary length falls — including mid-line through
+  // actual receipt content (see the reported photo: even a single-item
+  // receipt got autocut between the item line and the total). Two
+  // separate, individually-sized print jobs sidesteps this entirely —
+  // see the identical fix and fuller rationale in lib/posReceipt.ts's
+  // printBothReceipts.
+  //
+  // Each job's @page height is MEASURED from the live on-screen receipt
+  // (el.scrollHeight, converted px→mm) rather than left as "auto" — a
+  // fixed, explicit height is the one thing every page-based printer
+  // driver reliably honors, since there's no unbounded-roll-length
+  // guessing for it to get wrong. A generous safety margin (30% + a flat
+  // buffer) avoids reintroducing the OLDER, opposite bug where too thin a
+  // fixed estimate cut content off.
   const printCurrentReceipt = () => {
     const el = document.getElementById("receipt-content");
     if (!el) return;
@@ -1724,23 +1746,12 @@ function POSPageInner() {
     const existing = document.getElementById("pos-receipt-print-frame");
     if (existing) existing.remove();
 
-    // Prints BOTH a merchant copy and a customer copy in ONE continuous
-    // print job — same reasoning as printBothReceipts in
-    // lib/posReceipt.ts (used by the POS orders list / order-detail
-    // reprint): a real receipt printer produces one unbroken strip with
-    // a dashed tear line between copies, not two separate print jobs.
-    const copyLabel = (label: string) =>
-      `<div class="text-center" style="margin-bottom:2mm;">` +
-      `<span style="display:inline-block;border:2px solid #000;padding:1mm 3mm;letter-spacing:1px;font-weight:900;">${label}</span>` +
-      `</div>`;
-    const cutLine =
-      `<div class="text-center" style="font-size:11px;letter-spacing:2px;margin:6mm 0;">` +
-      `✂ - - - - - - - - - - - - - - - - - - - - - - - - -</div>`;
+    const measuredPxHeight = el.scrollHeight;
+    const measuredMm = (measuredPxHeight * 25.4) / 96;
+    const pageHeightMm = Math.ceil(measuredMm * 1.3) + 30;
 
-    const html = `
-      <!DOCTYPE html><html><head>
-      <style>
-        @page { size: 80mm auto; margin: 0; }
+    const styleBlock = `
+        @page { size: 80mm ${pageHeightMm}mm; margin: 0; }
         html { zoom: 1 !important; }
         * { box-sizing: border-box; }
         body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
@@ -1761,51 +1772,71 @@ function POSPageInner() {
         .my-2, .mb-3, .mt-3 { margin: 2mm 0; }
         .pt-1, .pt-2 { padding-top: 1mm; }
         * { letter-spacing: 0.01em; }
-      </style>
-      </head><body>${copyLabel("MERCHANT COPY")}${el.innerHTML}${cutLine}${copyLabel("CUSTOMER COPY")}${el.innerHTML}</body></html>
+    `;
+    const copyLabel = (label: string) =>
+      `<div class="text-center" style="margin-bottom:2mm;">` +
+      `<span style="display:inline-block;border:2px solid #000;padding:1mm 3mm;letter-spacing:1px;font-weight:900;">${label}</span>` +
+      `</div>`;
+
+    const buildDoc = (label: string) => `
+      <!DOCTYPE html><html><head><style>${styleBlock}</style></head>
+      <body>${copyLabel(label)}${el.innerHTML}</body></html>
     `;
 
-    const blob = new Blob([html], { type: "text/html" });
-    const blobUrl = URL.createObjectURL(blob);
+    // Prints one HTML document via an offscreen iframe, calling onDone
+    // once the OS print flow for it has finished (afterprint, or a 30s
+    // fallback in case that event never fires).
+    const printOneCopy = (html: string, onDone: () => void) => {
+      const blob = new Blob([html], { type: "text/html" });
+      const blobUrl = URL.createObjectURL(blob);
 
-    const iframe = document.createElement("iframe");
-    iframe.id = "pos-receipt-print-frame";
-    // Generous, not exact — this is just an offscreen rendering host
-    // (position:fixed, far off-screen), not what actually controls the
-    // printed page size (that's the @page CSS above). Bumped up since the
-    // content is now two copies back to back instead of one.
-    iframe.style.cssText =
-      "position:fixed;top:-9999px;left:-9999px;width:80mm;height:1000mm;border:none;";
+      const iframe = document.createElement("iframe");
+      iframe.id = "pos-receipt-print-frame";
+      // Generous, not exact — this is just an offscreen rendering host
+      // (position:fixed, far off-screen), not what actually controls the
+      // printed page size (that's the measured @page height above).
+      iframe.style.cssText =
+        "position:fixed;top:-9999px;left:-9999px;width:80mm;height:600mm;border:none;";
 
-    const cleanup = () => {
-      try {
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      } catch (_) {
-        /* ignore */
-      }
-      try {
-        URL.revokeObjectURL(blobUrl);
-      } catch (_) {
-        /* ignore */
-      }
-    };
-
-    iframe.onload = () => {
-      setTimeout(() => {
-        const win = iframe.contentWindow;
-        if (!win) {
-          cleanup();
-          return;
+      const cleanup = () => {
+        try {
+          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+        } catch (_) {
+          /* ignore */
         }
-        win.focus();
-        win.addEventListener("afterprint", cleanup, { once: true });
-        win.print();
-        setTimeout(cleanup, 30_000);
-      }, 300);
+        try {
+          URL.revokeObjectURL(blobUrl);
+        } catch (_) {
+          /* ignore */
+        }
+        onDone();
+      };
+
+      iframe.onload = () => {
+        setTimeout(() => {
+          const win = iframe.contentWindow;
+          if (!win) {
+            cleanup();
+            return;
+          }
+          win.focus();
+          win.addEventListener("afterprint", cleanup, { once: true });
+          win.print();
+          setTimeout(cleanup, 30_000);
+        }, 300);
+      };
+
+      iframe.src = blobUrl;
+      document.body.appendChild(iframe);
     };
 
-    iframe.src = blobUrl;
-    document.body.appendChild(iframe);
+    printOneCopy(buildDoc("MERCHANT COPY"), () => {
+      // Small gap so the OS print spooler/dialog has fully cleared
+      // before the second job starts.
+      setTimeout(() => {
+        printOneCopy(buildDoc("CUSTOMER COPY"), () => {});
+      }, 600);
+    });
   };
 
   const processPayment = async () => {

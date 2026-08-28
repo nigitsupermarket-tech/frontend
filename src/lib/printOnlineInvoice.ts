@@ -39,6 +39,21 @@ function esc(v: unknown): string {
   );
 }
 
+// Coarse, deliberately generous per-item/line height estimate — same
+// "30% + flat buffer" safety margin philosophy as lib/posReceipt.ts's
+// generousHeightMm, just estimated from item COUNT here rather than a
+// structured ReceiptLine[] (this file builds its HTML directly from an
+// Order object, not through that shared line-building path). Order of
+// magnitude, not precision — the generous margin is what actually
+// prevents content getting cut off, not exactness.
+function estimateInvoiceHeightMm(order: Order): number {
+  const itemCount = (order.items || []).length;
+  const base = 90; // header, address block, totals, footer — roughly fixed
+  const perItem = 6; // mm per item line at this font-size/line-height
+  const raw = base + itemCount * perItem;
+  return Math.ceil(raw * 1.3) + 30;
+}
+
 function money(n: number): string {
   return `&#8358;${Math.round(n).toLocaleString()}`;
 }
@@ -61,17 +76,22 @@ export function buildOnlineInvoiceHtml(
   return `<!DOCTYPE html><html><head>
     <meta charset="utf-8"/>
     <style>
-      /* size: 80mm auto — genuinely unbounded height, growing to fit
-         however much content is actually there, same as a real thermal
-         printer's continuous roll. This used to be a flat, hard-coded
-         297mm on the theory that "auto" could hang Chrome's print-preview
-         pagination on a fixed-page virtual destination like "Print to
-         PDF" — but the actually-reproduced bug in production was the
-         opposite: any invoice whose real content ran past 297mm just got
-         cut off entirely, with no second page or overflow handling at
-         all. See the identical fix (and fuller rationale) in
-         lib/posReceipt.ts's receiptStyleBlock(). */
-      @page { size: 80mm auto; margin: 0; }
+      /* size: 80mm ${estimateInvoiceHeightMm(order)}mm — a computed FIXED
+         height, not "auto". "auto" is the standards-correct pattern for
+         continuous-roll printing and was tried first, but several
+         Windows/POS thermal printer drivers don't honor it — they fall
+         back to their own internal page-length assumption regardless,
+         and the printer's autocutter fires at every page break THAT
+         produces, landing wherever it falls, including mid-content (see
+         the identical, directly-reproduced bug and full rationale in
+         lib/posReceipt.ts's receiptStyleBlock — this file shares the
+         same fix). A fixed, explicit height is the one thing every
+         page-based printer driver reliably honors. estimateInvoiceHeightMm
+         below uses a generous margin (30% + a flat buffer) specifically
+         to avoid reintroducing the OLDER, opposite bug this file used to
+         have (a flat 297mm that simply cut off anything longer). */
+      @page { size: 80mm ${estimateInvoiceHeightMm(order)}mm; margin: 0; }
+      html { zoom: 1 !important; }
       * { box-sizing: border-box; }
       body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
              width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;
