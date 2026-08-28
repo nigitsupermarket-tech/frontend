@@ -548,28 +548,6 @@ function queuePrint(win: Window, onDone?: () => void) {
   runNextPrintJob();
 }
 
-// ── Print BOTH copies as TWO separate print jobs ────────────────────────
-// This used to combine both copies into one continuous document (see
-// buildBothReceiptsHtml above) on the theory that a real thermal printer
-// produces merchant + customer copy as one unbroken strip with a
-// hand-torn "cut here" line. In practice, most Windows/POS thermal
-// printer drivers do NOT treat `@page { size: 80mm auto }` as a truly
-// unbounded roll — the driver's own configured paper length (whatever is
-// set in its Windows printer properties / paper-size list) still forces
-// the browser to paginate, and the printer's auto-cutter fires at EVERY
-// page break it's given, not just at our dashed line. With one long
-// combined document that produced 2–3 cuts in essentially random spots,
-// slicing through receipt content instead of just between the two
-// copies (this is what was in the photo the user sent).
-//
-// Two separate print() calls — one per copy — sidesteps this entirely:
-// each copy is short enough to fit the printer's own page length, so
-// each print job ends exactly where its content ends, and the
-// autocutter's per-job cut lands exactly at the end of that receipt.
-// This does mean two OS print jobs / two autocutter cuts instead of one,
-// but that's the "cut at the end of each receipt" behavior that was
-// actually asked for — and it's a much less fragile default than relying
-// on every printer driver correctly honoring an unbounded @page height.
 export function printBothReceipts(
   order: POSOrder,
   onAllDone?: () => void,
