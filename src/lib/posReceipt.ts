@@ -156,6 +156,13 @@ function buildReceiptBody(
 // proportional headroom plus a flat buffer, rather than a thin flat-only
 // pad. Slightly more blank paper at the tear line is a far smaller
 // problem than the paper being autocut through actual receipt content.
+// ONE-TIME PRINTER SETUP (Windows): register these 3 exact paper sizes as
+// custom "forms" on the Xprinter driver (Control Panel → Devices and
+// Printers → Xprinter → Printer properties → Advanced → New Form, or via
+// Print Server Properties → Forms) — 80 x 120mm, 80 x 220mm, 80 x 350mm.
+// Every receipt printed by this app requests exactly one of those three
+// heights (see HEIGHT_TIERS_MM above), so once these forms exist the
+// driver never has to guess/snap to a different preset.
 function receiptStyleBlock(heightMm: number): string {
   return `
       @page { size: 80mm ${heightMm}mm; margin: 2mm 0; }
@@ -206,8 +213,32 @@ function receiptStyleBlock(heightMm: number): string {
 // the big comment on receiptStyleBlock for why this needs to be much more
 // forgiving than the old, thin flat-only padding that caused the
 // original under-estimation bug.
+//
+// TIERING (fix for "prints and cuts in the middle" even after the above
+// margin was added): most Windows/POS thermal printer drivers — this
+// Xprinter included — don't actually accept an arbitrary custom @page
+// height. They only recognise a short preset list of registered paper
+// "forms". When the browser asks for a height that isn't in that list
+// (which is virtually guaranteed with a computed, order-specific value
+// like 187mm), the driver silently snaps to its nearest preset instead
+// of the one requested — and that preset can easily be SHORTER than the
+// actual content, which is exactly what produces a cut through the
+// middle of a receipt.
+//
+// The fix is to stop asking for a unique height per receipt and instead
+// always round UP to one of a small, fixed set of tiers. That way there
+// are only ever 3 distinct heights this app will ever request, and you
+// register exactly those 3 as custom forms in the printer driver once
+// (see the setup note in receiptStyleBlock below) — so every receipt
+// maps to an EXACT match, never a guess.
+const HEIGHT_TIERS_MM = [120, 220, 350];
+
 function generousHeightMm(lines: ReceiptLine[]): number {
-  return Math.ceil(estimateHeightMm(lines) * 1.3) + 30;
+  const raw = Math.ceil(estimateHeightMm(lines) * 1.3) + 30;
+  return (
+    HEIGHT_TIERS_MM.find((tier) => tier >= raw) ??
+    HEIGHT_TIERS_MM[HEIGHT_TIERS_MM.length - 1]
+  );
 }
 
 // Single-copy document — still used by anything that only ever needs one
