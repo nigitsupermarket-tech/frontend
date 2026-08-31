@@ -226,12 +226,27 @@ function receiptStyleBlock(heightMm: number): string {
 // middle of a receipt.
 //
 // The fix is to stop asking for a unique height per receipt and instead
-// always round UP to one of a small, fixed set of tiers. That way there
-// are only ever 3 distinct heights this app will ever request, and you
-// register exactly those 3 as custom forms in the printer driver once
-// (see the setup note in receiptStyleBlock below) — so every receipt
-// maps to an EXACT match, never a guess.
-const HEIGHT_TIERS_MM = [120, 220, 350];
+// always round UP to one of a small, fixed set of tiers.
+//
+// IMPORTANT — the top tier here is capped at 290mm, not higher. Checked
+// directly in this printer's own Windows driver Properties dialog
+// (Devices and Printers → printer → Properties → General → "Paper
+// available"): it reports a hard maximum of 80 x 297mm. Asking for
+// anything above that doesn't get a taller page — the driver just
+// silently clips back down to its own 297mm ceiling and cuts there,
+// mid-content, on any order long enough to need more. That's a
+// hard driver/hardware limit; no CSS value raises it. If a different
+// printer/driver reports a different max in its own Properties dialog,
+// adjust this last number to match (a few mm under the reported max).
+//
+// This tiering can only help orders that fit under that true ceiling.
+// For anything longer, there is NO fix available through the browser/OS
+// print pipeline at all — this is exactly why the raw-USB print bridge
+// (the desktop app) exists: it has no page-length concept whatsoever,
+// so it's the only path with no ceiling. printBothReceiptsSmart below
+// tries that path first for exactly this reason, falling back to this
+// tiered approach only when the bridge isn't reachable.
+const HEIGHT_TIERS_MM = [120, 220, 290];
 
 function generousHeightMm(lines: ReceiptLine[]): number {
   const raw = Math.ceil(estimateHeightMm(lines) * 1.3) + 30;
@@ -528,9 +543,47 @@ function printAndClose(win: Window, onDone: () => void) {
         return;
       }
       win.focus();
-      // Listen on BOTH the top window and the print window — different
-      // browsers dispatch `afterprint` to different targets. First one to
-      // fire wins.
+
+      // Inside the desktop app, this popup window has the same
+      // posDesktop bridge as the main window (see main.js's
+      // overrideBrowserWindowOptions for same-site popups), so print
+      // silently — no OS dialog, no manual printer selection. This is
+      // what actually fixes the Windows Print dialog you were seeing:
+      // window.print() in Electron opens that dialog by default, this
+      // bypasses it entirely and prints straight to the configured
+      // printer.
+      const desktop = (
+        win as unknown as {
+          posDesktop?: {
+            isDesktopApp: boolean;
+            silentPrint: () => Promise<{
+              success: boolean;
+              failureReason?: string;
+            }>;
+          };
+        }
+      ).posDesktop;
+      if (desktop?.isDesktopApp) {
+        desktop
+          .silentPrint()
+          .then(({ success, failureReason }) => {
+            if (!success) {
+              console.error(
+                `[posReceipt] Silent print failed: ${failureReason}`,
+              );
+            }
+            cleanup();
+          })
+          .catch((err) => {
+            console.error("[posReceipt] Silent print error:", err);
+            cleanup();
+          });
+        return;
+      }
+
+      // Normal browser tab (not the desktop app) — same as before:
+      // window.print() opens the browser's own print UI, and
+      // `afterprint` tells us when that's done.
       window.addEventListener("afterprint", cleanup, { once: true });
       win.addEventListener("afterprint", cleanup, { once: true });
       win.print();
@@ -548,6 +601,28 @@ function queuePrint(win: Window, onDone?: () => void) {
   runNextPrintJob();
 }
 
+// ── Print BOTH copies as TWO separate print jobs ────────────────────────
+// This used to combine both copies into one continuous document (see
+// buildBothReceiptsHtml above) on the theory that a real thermal printer
+// produces merchant + customer copy as one unbroken strip with a
+// hand-torn "cut here" line. In practice, most Windows/POS thermal
+// printer drivers do NOT treat `@page { size: 80mm auto }` as a truly
+// unbounded roll — the driver's own configured paper length (whatever is
+// set in its Windows printer properties / paper-size list) still forces
+// the browser to paginate, and the printer's auto-cutter fires at EVERY
+// page break it's given, not just at our dashed line. With one long
+// combined document that produced 2–3 cuts in essentially random spots,
+// slicing through receipt content instead of just between the two
+// copies (this is what was in the photo the user sent).
+//
+// Two separate print() calls — one per copy — sidesteps this entirely:
+// each copy is short enough to fit the printer's own page length, so
+// each print job ends exactly where its content ends, and the
+// autocutter's per-job cut lands exactly at the end of that receipt.
+// This does mean two OS print jobs / two autocutter cuts instead of one,
+// but that's the "cut at the end of each receipt" behavior that was
+// actually asked for — and it's a much less fragile default than relying
+// on every printer driver correctly honoring an unbounded @page height.
 export function printBothReceipts(
   order: POSOrder,
   onAllDone?: () => void,
@@ -576,4 +651,74 @@ export function printBothReceipts(
   }
 
   queuePrint(merchantWin, () => queuePrint(customerWin, onAllDone));
+}
+
+// ── Print via the local ESC/POS agent (preferred), falling back to the
+// browser print pipeline above when the agent isn't reachable ──────────
+//
+// WHY THIS EXISTS: the two fixes above (fixed @page height, splitting
+// into two print jobs) solve the mid-content cut for SHORT-to-MEDIUM
+// receipts, but they can't solve it for arbitrarily long ones — Windows
+// thermal printer drivers (and often the printer's own firmware buffer)
+// have a hard maximum single-page length, and once a real receipt (many
+// items) exceeds it, the driver forces a page break regardless of what
+// @page CSS asked for, and the autocutter fires there — mid-content
+// again. There's no page-height value that fixes this for every
+// possible order size, because the order size itself is unbounded.
+//
+// The only way around that ceiling is to stop going through the OS/GDI
+// print pipeline at all. print-agent/ (see that folder's README) is a
+// tiny local service that talks to the printer directly over USB using
+// raw ESC/POS commands — there's no "page" in that protocol, so a
+// 3-item and a 30-item receipt behave identically: the printer just
+// keeps feeding until we explicitly send the cut command, once, at the
+// true end of the content.
+//
+// This machine may not have the agent installed/running yet (e.g. right
+// after this code ships, before someone's done the one-time setup), so
+// this always tries the agent first with a short timeout and silently
+// falls back to the existing window.print() path — nothing breaks for
+// stores that haven't set up the agent, and everyone gets the length-
+// proof path automatically once they have.
+const PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_PRINT_AGENT_URL || "http://127.0.0.1:9142";
+const PRINT_AGENT_TIMEOUT_MS = 1200;
+
+async function tryPrintViaAgent(order: POSOrder): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PRINT_AGENT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${PRINT_AGENT_URL}/print`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order,
+        copies: ["MERCHANT COPY", "CUSTOMER COPY"],
+      }),
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch (_) {
+    // Agent not running / not installed on this machine / USB error —
+    // any of these fall through to the browser-print path below.
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function printBothReceiptsSmart(
+  order: POSOrder,
+  onAllDone?: () => void,
+  onError?: (message: string) => void,
+) {
+  tryPrintViaAgent(order).then((ok) => {
+    if (ok) {
+      onAllDone?.();
+      return;
+    }
+    // Fall back to the browser print pipeline exactly as before — same
+    // behavior this app already had prior to the print agent existing.
+    printBothReceipts(order, onAllDone, onError);
+  });
 }
