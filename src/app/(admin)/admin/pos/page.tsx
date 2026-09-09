@@ -41,6 +41,7 @@ import { useAuthStore } from "@/store/authStore";
 import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
 import ScalePanel from "@/components/admin/pos/ScalePanel";
 import WeighModal from "@/components/admin/pos/WeighModal";
+import { printBothReceipts } from "@/lib/posReceipt";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProductVariation {
@@ -1710,133 +1711,48 @@ function POSPageInner() {
     }
   };
 
-  // ── Print receipt from checkout modal using iframe (avoids printing full page) ──
-  // NOTE: We use a Blob URL assigned to `iframe.src` rather than
-  // `doc.write()`. With doc.write, the iframe's `load` event has typically
-  // already fired (for the initial about:blank doc) by the time `onload` is
-  // attached — it "works" on the very first print of a page session by luck,
-  // but `onload` never re-fires on subsequent prints, so nothing happens.
-  // A Blob URL reliably fires `load` every time.
-  // Prints a merchant copy, THEN a customer copy, as TWO SEPARATE print
-  // jobs — not one combined document. This used to combine both into one
-  // continuous print job (a single "cut here" divider between them), on
-  // the theory that a real thermal printer treats it as one unbroken
-  // strip. In production, several Windows/POS thermal printer drivers
-  // don't honor an unbounded/auto page height — they fall back to their
-  // own internal page-length assumption and paginate anyway, and the
-  // printer's autocutter fires at every page break it's given, landing
-  // wherever that arbitrary length falls — including mid-line through
-  // actual receipt content (see the reported photo: even a single-item
-  // receipt got autocut between the item line and the total). Two
-  // separate, individually-sized print jobs sidesteps this entirely —
-  // see the identical fix and fuller rationale in lib/posReceipt.ts's
-  // printBothReceipts.
-  //
-  // Each job's @page height is MEASURED from the live on-screen receipt
-  // (el.scrollHeight, converted px→mm) rather than left as "auto" — a
-  // fixed, explicit height is the one thing every page-based printer
-  // driver reliably honors, since there's no unbounded-roll-length
-  // guessing for it to get wrong. A generous safety margin (30% + a flat
-  // buffer) avoids reintroducing the OLDER, opposite bug where too thin a
-  // fixed estimate cut content off.
+  // Print exactly one merchant copy and one customer copy through the
+  // shared receipt printer bridge. In the Electron desktop app,
+  // lib/posReceipt.ts detects the posDesktop bridge and uses silentPrint()
+  // instead of Chrome/window.print(). Keeping a single printing path here
+  // prevents the POS page from accidentally creating an additional browser
+  // print job alongside the Electron bridge.
   const printCurrentReceipt = () => {
-    const el = document.getElementById("receipt-content");
-    if (!el) return;
+    if (!completedOrder) return;
 
-    const existing = document.getElementById("pos-receipt-print-frame");
-    if (existing) existing.remove();
-
-    const measuredPxHeight = el.scrollHeight;
-    const measuredMm = (measuredPxHeight * 25.4) / 96;
-    const pageHeightMm = Math.ceil(measuredMm * 1.3) + 30;
-
-    const styleBlock = `
-        @page { size: 80mm ${pageHeightMm}mm; margin: 0; }
-        html { zoom: 1 !important; }
-        * { box-sizing: border-box; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 12px;
-               width: 72mm; margin: 0 auto; padding: 4mm 2mm; line-height: 1.5;
-               color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .text-center, .center { text-align: center; }
-        .font-bold, .bold, b, strong { font-weight: 900; }
-        .text-gray-400, .text-gray-500, .text-gray-600 { color: #000; }
-        .border-t { border-top: 1px dashed #000; margin: 3mm 0; }
-        .border-dashed { border-style: dashed; }
-        .flex { display: flex; }
-        .justify-between { justify-content: space-between; }
-        .space-y-1 > * { margin-bottom: 1mm; }
-        .text-base { font-size: 13px; font-weight: 700; }
-        .text-2xl, .text-xl { font-size: 15px; font-weight: 900; }
-        .text-xs { font-size: 11px; }
-        .text-\\[10px\\] { font-size: 10px; }
-        .my-2, .mb-3, .mt-3 { margin: 2mm 0; }
-        .pt-1, .pt-2 { padding-top: 1mm; }
-        * { letter-spacing: 0.01em; }
-    `;
-    const copyLabel = (label: string) =>
-      `<div class="text-center" style="margin-bottom:2mm;">` +
-      `<span style="display:inline-block;border:2px solid #000;padding:1mm 3mm;letter-spacing:1px;font-weight:900;">${label}</span>` +
-      `</div>`;
-
-    const buildDoc = (label: string) => `
-      <!DOCTYPE html><html><head><style>${styleBlock}</style></head>
-      <body>${copyLabel(label)}${el.innerHTML}</body></html>
-    `;
-
-    // Prints one HTML document via an offscreen iframe, calling onDone
-    // once the OS print flow for it has finished (afterprint, or a 30s
-    // fallback in case that event never fires).
-    const printOneCopy = (html: string, onDone: () => void) => {
-      const blob = new Blob([html], { type: "text/html" });
-      const blobUrl = URL.createObjectURL(blob);
-
-      const iframe = document.createElement("iframe");
-      iframe.id = "pos-receipt-print-frame";
-      // Generous, not exact — this is just an offscreen rendering host
-      // (position:fixed, far off-screen), not what actually controls the
-      // printed page size (that's the measured @page height above).
-      iframe.style.cssText =
-        "position:fixed;top:-9999px;left:-9999px;width:80mm;height:600mm;border:none;";
-
-      const cleanup = () => {
-        try {
-          if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-        } catch (_) {
-          /* ignore */
-        }
-        try {
-          URL.revokeObjectURL(blobUrl);
-        } catch (_) {
-          /* ignore */
-        }
-        onDone();
-      };
-
-      iframe.onload = () => {
-        setTimeout(() => {
-          const win = iframe.contentWindow;
-          if (!win) {
-            cleanup();
-            return;
-          }
-          win.focus();
-          win.addEventListener("afterprint", cleanup, { once: true });
-          win.print();
-          setTimeout(cleanup, 30_000);
-        }, 300);
-      };
-
-      iframe.src = blobUrl;
-      document.body.appendChild(iframe);
+    const printOrder = {
+      id: completedOrder.posOrderNumber,
+      posOrderNumber: completedOrder.posOrderNumber,
+      receiptNumber: completedOrder.receiptNumber,
+      status: "COMPLETED" as const,
+      paymentMethod: completedOrder.paymentMethod,
+      subtotal: completedOrder.subtotal,
+      discountAmount: completedOrder.discountAmount,
+      total: completedOrder.total,
+      amountTendered: completedOrder.amountTendered,
+      changeGiven: completedOrder.changeGiven,
+      customerName: completedOrder.customerName,
+      customerPhone: completedOrder.customerPhone,
+      createdAt: completedOrder.processedAt.toISOString(),
+      items: completedOrder.items.map((item, index) => ({
+        id: `${completedOrder.posOrderNumber}-${index}`,
+        productName: item.product.name,
+        productSku: item.product.sku,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        subtotal:
+          item.unitPrice * item.quantity * (1 - item.discount / 100),
+        discountApplied: item.discount,
+        netWeight: item.product.netWeight,
+        scaleUnit: item.product.isScalable
+          ? (item.product.scaleUnit ?? undefined)
+          : undefined,
+        variationLabel: item.variationLabel ?? null,
+      })),
+      processedBy: { name: "POS", role: "CASHIER" },
     };
 
-    printOneCopy(buildDoc("MERCHANT COPY"), () => {
-      // Small gap so the OS print spooler/dialog has fully cleared
-      // before the second job starts.
-      setTimeout(() => {
-        printOneCopy(buildDoc("CUSTOMER COPY"), () => {});
-      }, 600);
-    });
+    printBothReceipts(printOrder);
   };
 
   const processPayment = async () => {

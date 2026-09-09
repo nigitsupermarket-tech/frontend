@@ -682,7 +682,7 @@ export function printBothReceipts(
 // proof path automatically once they have.
 const PRINT_AGENT_URL =
   process.env.NEXT_PUBLIC_PRINT_AGENT_URL || "http://127.0.0.1:9142";
-const PRINT_AGENT_TIMEOUT_MS = 1200;
+const PRINT_AGENT_TIMEOUT_MS = 10000;
 
 async function tryPrintViaAgent(order: POSOrder): Promise<boolean> {
   const controller = new AbortController();
@@ -712,13 +712,30 @@ export function printBothReceiptsSmart(
   onAllDone?: () => void,
   onError?: (message: string) => void,
 ) {
+  // Electron is the intended POS printing bridge. Prefer it directly so a
+  // successful desktop print request is never followed by a second browser
+  // print path. The shared printBothReceipts() function detects the bridge
+  // on each print window and calls silentPrint().
+  const desktop = (
+    window as unknown as {
+      posDesktop?: { isDesktopApp?: boolean };
+    }
+  ).posDesktop;
+
+  if (desktop?.isDesktopApp) {
+    printBothReceipts(order, onAllDone, onError);
+    return;
+  }
+
   tryPrintViaAgent(order).then((ok) => {
     if (ok) {
       onAllDone?.();
       return;
     }
-    // Fall back to the browser print pipeline exactly as before — same
-    // behavior this app already had prior to the print agent existing.
+    // Only use the browser fallback when the local agent request clearly
+    // failed. The agent timeout is deliberately generous because an aborted
+    // HTTP request can otherwise race with a print that the agent already
+    // accepted, producing duplicate receipts.
     printBothReceipts(order, onAllDone, onError);
   });
 }
