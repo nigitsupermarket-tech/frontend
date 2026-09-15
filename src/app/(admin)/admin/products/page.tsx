@@ -648,7 +648,13 @@ export default function AdminProductsPage() {
                 <p className="text-gray-400">Checking related records…</p>
               ) : relatedRecords ? (
                 (() => {
-                  const rows: [string, number][] = [
+                  // Declared separately (not chained straight into
+                  // .filter()) so each literal is contextually typed as a
+                  // [string, number] tuple — chaining .filter() directly
+                  // onto the array literal makes TS infer the untyped
+                  // elements as the wider `(string | number)[]` and then
+                  // reject the result against the tuple-array annotation.
+                  const allRows: [string, number][] = [
                     ["Order line items", Number(relatedRecords.orderItems || 0)],
                     ["POS order line items", Number(relatedRecords.posOrderItems || 0)],
                     ["Reviews", Number(relatedRecords.reviews || 0)],
@@ -657,7 +663,8 @@ export default function AdminProductsPage() {
                     ["Inventory logs", Number(relatedRecords.inventoryLogs || 0)],
                     ["Stock approvals", Number(relatedRecords.stockApprovals || 0)],
                     ["Variations", Number(relatedRecords.variations || 0)],
-                  ].filter(([, count]) => count > 0);
+                  ];
+                  const rows = allRows.filter(([, count]) => count > 0);
                   if (rows.length === 0) {
                     return (
                       <p className="text-green-700">
