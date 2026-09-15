@@ -7,6 +7,7 @@ import { AdminSidebar } from "@/components/admin/sidebar";
 import { AdminHeader } from "@/components/admin/header";
 import { SidebarProvider } from "@/components/admin/sidebar-context";
 import { PageLoader } from "@/components/shared/loading-spinner";
+import { LastPageTracker } from "@/components/admin/last-page-tracker";
 
 const ALLOWED_ROLES = ["ADMIN", "STAFF", "SALES", "MANAGER", "ACCOUNTANT"];
 
@@ -51,6 +52,7 @@ export default function AdminLayout({
   // if (!isReady) return <PageLoader />;
   return (
     <SidebarProvider>
+      <LastPageTracker />
       <div className="flex h-screen overflow-hidden bg-gray-50">
         <AdminSidebar />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">

@@ -34,10 +34,11 @@ import {
   PauseCircle,
   PlayCircle,
 } from "lucide-react";
-import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatPrice, formatScaleQty, getProductImage } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
+import { useDraftSync } from "@/hooks/useDraftSync";
 import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
 import ScalePanel from "@/components/admin/pos/ScalePanel";
 import WeighModal from "@/components/admin/pos/WeighModal";
@@ -963,10 +964,33 @@ function POSPageInner() {
 
   // Cart
   const [cart, setCart] = useState<CartItem[]>([]);
+  // "Continue where you left off" — restores an in-progress cart (items
+  // added but not yet held or checked out) after a logout/token-expiry/
+  // closed-tab. Waits for the session to be ready before restoring so a
+  // rebuilt cart isn't immediately confused with a brand-new session.
+  // Cleared inside clearCart() below — the same choke point already hit
+  // on both "sale completed" and "transaction held" success paths.
+  const { restored: cartRestored, clearDraft: clearCartDraft } = useDraftSync(
+    {
+      key: "pos-cart",
+      state: cart,
+      enabled: !sessionLoading && !!session,
+      restoreWhen: !sessionLoading,
+      shouldRestore: (payload) => Array.isArray(payload) && payload.length > 0,
+      onRestore: (payload) => setCart(payload),
+    },
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+
+  useEffect(() => {
+    if (cartRestored) {
+      toast("Restored your in-progress cart from before", "success");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartRestored]);
   // Mirrors POSProductGrid's pickerProduct — the search bar and barcode
   // scanner are a separate render tree from the Quick-Add Grid, so they need
   // their own picker state to prompt for an option/preset instead of
@@ -1015,6 +1039,9 @@ function POSPageInner() {
   const [showSuspendDialog, setShowSuspendDialog] = useState(false);
   const [suspending, setSuspending] = useState(false);
   const [resuming, setResuming] = useState<string | null>(null); // orderId being resumed
+  const [deletingSuspended, setDeletingSuspended] = useState<string | null>(
+    null,
+  ); // orderId being deleted
   // The DB id of the currently-active suspended order (set when we resume one)
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
 
@@ -1572,6 +1599,7 @@ function POSPageInner() {
 
   const clearCart = () => {
     setCart([]);
+    clearCartDraft();
     setAppliedDiscount(null);
     setCouponCode("");
     setManualDiscount(0);
@@ -1689,6 +1717,29 @@ function POSPageInner() {
       toast(getApiError(err), "error");
     } finally {
       setResuming(null);
+    }
+  };
+
+  // ── Delete/cancel a held (suspended) transaction ─────────────────────────
+  // Open to every POS role — a held order never had stock deducted or
+  // payment taken, so there's nothing to approve or restore.
+  const handleDeleteSuspended = async (order: SuspendedOrder) => {
+    if (
+      !window.confirm(
+        `Delete held transaction "${order.posOrderNumber}"? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingSuspended(order.id);
+    try {
+      await apiDelete(`/pos/orders/${order.id}/suspended`);
+      setSuspendedOrders((prev) => prev.filter((o) => o.id !== order.id));
+      toast(`Held transaction "${order.posOrderNumber}" deleted`, "success");
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setDeletingSuspended(null);
     }
   };
 
@@ -2962,23 +3013,38 @@ function POSPageInner() {
                             )}
                           </ul>
                         </div>
-                        <button
-                          onClick={() => handleResume(order)}
-                          disabled={!!resuming || cart.length > 0}
-                          className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
-                          title={
-                            cart.length > 0
-                              ? "Clear or hold current cart first"
-                              : "Resume this transaction"
-                          }
-                        >
-                          {resuming === order.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <PlayCircle className="w-3.5 h-3.5" />
-                          )}
-                          Resume
-                        </button>
+                        <div className="flex-shrink-0 flex flex-col gap-1.5">
+                          <button
+                            onClick={() => handleResume(order)}
+                            disabled={!!resuming || cart.length > 0}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
+                            title={
+                              cart.length > 0
+                                ? "Clear or hold current cart first"
+                                : "Resume this transaction"
+                            }
+                          >
+                            {resuming === order.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <PlayCircle className="w-3.5 h-3.5" />
+                            )}
+                            Resume
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSuspended(order)}
+                            disabled={!!deletingSuspended}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-700 text-xs font-bold rounded-lg border border-red-200"
+                            title="Delete this held transaction"
+                          >
+                            {deletingSuspended === order.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}

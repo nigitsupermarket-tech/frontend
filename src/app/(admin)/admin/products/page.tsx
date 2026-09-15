@@ -95,13 +95,22 @@ export default function AdminProductsPage() {
 
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
-  // Hard delete is restricted to ADMIN and MANAGER roles
-  const canDelete = user?.role === "ADMIN" || user?.role === "MANAGER";
+  // ADMIN hard-deletes directly; STAFF and MANAGER must submit a request
+  // for an admin to approve (see /admin/products/delete-requests).
+  const canDeleteDirect = isAdmin;
+  const canRequestDelete = user?.role === "STAFF" || user?.role === "MANAGER";
+  const canOpenDeleteFlow = canDeleteDirect || canRequestDelete;
   const toast = useToast();
 
-  // Warning dialog state for hard delete
+  // Warning dialog state for hard delete / delete-request
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [relatedRecords, setRelatedRecords] = useState<Record<
+    string,
+    number | boolean
+  > | null>(null);
+  const [loadingRelated, setLoadingRelated] = useState(false);
 
   useEffect(() => {
     apiGet<any>("/categories?limit=200")
@@ -167,22 +176,51 @@ export default function AdminProductsPage() {
     filters.status ||
     filters.stockStatus;
 
-  // Opens the warning dialog for a given product (does not delete yet)
-  const requestDelete = (product: Product) => {
-    if (!canDelete) {
-      toast("Only admins and managers can delete products", "error");
+  // Opens the warning dialog for a given product (does not delete yet) —
+  // also pulls the related-records summary so the dialog can show exactly
+  // what a hard delete would take down, before anyone confirms anything.
+  const requestDelete = async (product: Product) => {
+    if (!canOpenDeleteFlow) {
+      toast("Only staff, managers, and admins can delete products", "error");
       return;
     }
     setDeleteTarget(product);
+    setDeleteReason("");
+    setRelatedRecords(null);
+    setLoadingRelated(true);
+    try {
+      const res = await apiGet<any>(`/products/${product.id}/related-records`);
+      setRelatedRecords(res.data.relatedRecords);
+    } catch {
+      // Non-fatal — the dialog still works without the summary, it just
+      // won't show the related-record breakdown.
+    } finally {
+      setLoadingRelated(false);
+    }
   };
 
-  // Confirmed from the warning dialog — performs the actual hard delete
+  // Confirmed from the warning dialog — ADMIN performs the actual hard
+  // delete immediately; STAFF/MANAGER submit a request for admin approval.
   const confirmDelete = async () => {
-    if (!deleteTarget || !canDelete) return;
+    if (!deleteTarget) return;
+    if (canRequestDelete && !canDeleteDirect && !deleteReason.trim()) {
+      toast("A reason is required to request a deletion", "error");
+      return;
+    }
     setIsDeleting(true);
     try {
-      await apiDelete(`/products/${deleteTarget.id}`);
-      toast(`"${deleteTarget.name}" permanently deleted`, "success");
+      if (canDeleteDirect) {
+        await apiDelete(`/products/${deleteTarget.id}`);
+        toast(`"${deleteTarget.name}" permanently deleted`, "success");
+      } else {
+        await apiPost(`/products/${deleteTarget.id}/delete-request`, {
+          reason: deleteReason.trim(),
+        });
+        toast(
+          `Delete request for "${deleteTarget.name}" submitted — awaiting admin approval`,
+          "success",
+        );
+      }
       setDeleteTarget(null);
       fetchProducts(page, filters);
     } catch (err) {
@@ -509,7 +547,7 @@ export default function AdminProductsPage() {
                           <Edit2 className="w-4 h-4" />
                         </Link>
                         {/* Only ADMIN and MANAGER can see/perform hard delete */}
-                        {canDelete && (
+                        {canOpenDeleteFlow && (
                           <button
                             onClick={() => requestDelete(product)}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
@@ -561,22 +599,38 @@ export default function AdminProductsPage() {
         onSuccess={() => fetchProducts(page, filters)}
       />
 
-      {/* Hard Delete Warning Dialog (ADMIN / MANAGER only) */}
+      {/* Hard Delete Warning Dialog — ADMIN deletes directly; STAFF/MANAGER
+          submit a request for admin approval instead. */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-full bg-red-50 shrink-0">
                 <AlertTriangle className="w-5 h-5 text-red-600" />
               </div>
               <div>
-                <h2 className="font-bold text-gray-900">Delete product?</h2>
+                <h2 className="font-bold text-gray-900">
+                  {canDeleteDirect ? "Delete product?" : "Request deletion?"}
+                </h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  This will permanently delete{" "}
-                  <span className="font-medium text-gray-700">
-                    &ldquo;{deleteTarget.name}&rdquo;
-                  </span>{" "}
-                  and all of its images. This action cannot be undone.
+                  {canDeleteDirect ? (
+                    <>
+                      This will permanently delete{" "}
+                      <span className="font-medium text-gray-700">
+                        &ldquo;{deleteTarget.name}&rdquo;
+                      </span>{" "}
+                      and all of its images. This action cannot be undone.
+                    </>
+                  ) : (
+                    <>
+                      This submits a request to permanently delete{" "}
+                      <span className="font-medium text-gray-700">
+                        &ldquo;{deleteTarget.name}&rdquo;
+                      </span>{" "}
+                      — an admin must review and approve it before anything
+                      is actually removed.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -585,6 +639,73 @@ export default function AdminProductsPage() {
               ⚠️ Hard delete: the product record is removed completely — it
               cannot be recovered or restored.
             </div>
+
+            {/* Related-records summary — what stakeholders should see
+                before this goes any further. */}
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700 space-y-1.5">
+              <p className="font-semibold text-gray-800">Related records</p>
+              {loadingRelated ? (
+                <p className="text-gray-400">Checking related records…</p>
+              ) : relatedRecords ? (
+                (() => {
+                  const rows: [string, number][] = [
+                    ["Order line items", Number(relatedRecords.orderItems || 0)],
+                    ["POS order line items", Number(relatedRecords.posOrderItems || 0)],
+                    ["Reviews", Number(relatedRecords.reviews || 0)],
+                    ["Cart items", Number(relatedRecords.cartItems || 0)],
+                    ["Wishlist items", Number(relatedRecords.wishlistItems || 0)],
+                    ["Inventory logs", Number(relatedRecords.inventoryLogs || 0)],
+                    ["Stock approvals", Number(relatedRecords.stockApprovals || 0)],
+                    ["Variations", Number(relatedRecords.variations || 0)],
+                  ].filter(([, count]) => count > 0);
+                  if (rows.length === 0) {
+                    return (
+                      <p className="text-green-700">
+                        No related records — safe to delete.
+                      </p>
+                    );
+                  }
+                  return (
+                    <>
+                      <ul className="space-y-0.5">
+                        {rows.map(([label, count]) => (
+                          <li key={label} className="flex justify-between">
+                            <span>{label}</span>
+                            <span className="font-semibold">{count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {relatedRecords.hasOrderHistory && (
+                        <p className="text-red-700 font-medium pt-1">
+                          ⚠️ This product has order history — those records
+                          keep their own name/SKU snapshot but will no longer
+                          link to a live product.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()
+              ) : (
+                <p className="text-gray-400">Unavailable</p>
+              )}
+            </div>
+
+            {/* Reason — required for STAFF/MANAGER requests, not shown for
+                a direct admin delete. */}
+            {!canDeleteDirect && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Reason for deletion (required)
+                </label>
+                <textarea
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  rows={3}
+                  placeholder="Why should this product be permanently deleted?"
+                  className="w-full border border-gray-200 px-3 py-2 text-sm rounded-lg focus:outline-none focus:border-gray-400 resize-none"
+                />
+              </div>
+            )}
 
             <div className="flex gap-3">
               <button
@@ -599,7 +720,13 @@ export default function AdminProductsPage() {
                 disabled={isDeleting}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
               >
-                {isDeleting ? "Deleting…" : "Delete Permanently"}
+                {isDeleting
+                  ? canDeleteDirect
+                    ? "Deleting…"
+                    : "Submitting…"
+                  : canDeleteDirect
+                    ? "Delete Permanently"
+                    : "Submit for Approval"}
               </button>
             </div>
           </div>

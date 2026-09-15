@@ -2,11 +2,13 @@
 "use client";
 
 import { useAuthStore } from "@/store/authStore";
-import { getApiError } from "@/lib/api";
+import { getApiError, apiGet } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useCartStore } from "@/store/cartStore";
 import { LoginPayload, RegisterPayload } from "@/types";
 import axios from "axios";
+
+const STAFF_SIDE_ROLES = ["ADMIN", "STAFF", "SALES", "MANAGER", "ACCOUNTANT"];
 
 export function useAuth() {
   const store = useAuthStore();
@@ -27,10 +29,31 @@ export function useAuth() {
 
       toast("Welcome back!", "success");
 
-      console.log("[useAuth] Navigating to:", redirectTo);
+      // ── "Continue where you left off" ────────────────────────────────
+      // Staff-side roles landing on the generic dashboard entry point
+      // (not somewhere specific they were already trying to reach) get
+      // routed back to the exact admin page they were last on, if we
+      // have one saved — see last-page-tracker.tsx.
+      let finalRedirect = redirectTo;
+      const role = useAuthStore.getState().user?.role;
+      const isGenericLanding = redirectTo === "/" || redirectTo === "/admin";
+      if (role && STAFF_SIDE_ROLES.includes(role) && isGenericLanding) {
+        try {
+          const res = await apiGet<any>("/drafts/last-page");
+          const lastPath = res.data?.draft?.path;
+          if (lastPath && typeof lastPath === "string") {
+            finalRedirect = lastPath;
+          }
+        } catch {
+          // No saved page, or the check failed — fall back to the normal
+          // redirect target, nothing lost.
+        }
+      }
+
+      console.log("[useAuth] Navigating to:", finalRedirect);
       // Full navigation so the (customer) layout gets a fresh mount
       // and its useEffect re-runs cleanly on the new page
-      window.location.href = redirectTo;
+      window.location.href = finalRedirect;
     } catch (error) {
       console.log("[useAuth] login() FAILED:", error);
       if (axios.isAxiosError(error)) {

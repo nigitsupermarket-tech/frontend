@@ -11,6 +11,7 @@ import { ArrowLeft, Loader2, Plus, X, Tag, Scale, RefreshCw, AlertTriangle } fro
 import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import { useDraftSync } from "@/hooks/useDraftSync";
 import { useRouter } from "next/navigation";
 import { generateSlug, generateSKU } from "@/lib/utils";
 import { Category, Brand } from "@/types";
@@ -283,6 +284,24 @@ export default function ProductForm({ productId, onSave }: Props) {
   // a product-level stockQuantity edit already is (see handleSubmit below).
   const originalVariationStockRef = useRef<Record<string, number | null>>({});
   const [activeTab, setActiveTab] = useState("basic");
+
+  // ── "Continue where you left off" ────────────────────────────────────
+  // Autosaves this form's in-progress state (fields + variations) so a
+  // logout/token-expiry/closed-tab mid-edit doesn't lose the work — see
+  // useDraftSync.ts. Restoring is skipped while the real product data is
+  // still loading (below) so a restored draft doesn't get clobbered by
+  // the fetch, and the draft is cleared on a successful save.
+  const draftKey = productId ? `product-edit:${productId}` : "product-create";
+  const { restored, clearDraft } = useDraftSync({
+    key: draftKey,
+    state: { form, variations },
+    enabled: !isLoading && !saving,
+    restoreWhen: !isLoading,
+    onRestore: (payload) => {
+      if (payload?.form) setForm(payload.form);
+      if (payload?.variations) setVariations(payload.variations);
+    },
+  });
 
   useEffect(() => {
     const loadData = async () => {
@@ -887,6 +906,7 @@ export default function ProductForm({ productId, onSave }: Props) {
           // touch this field" on the backend, same as every other field a
           // non-admin isn't allowed to write directly.
         });
+        clearDraft();
         onSave?.();
         setSaving(false);
         return;
@@ -927,6 +947,7 @@ export default function ProductForm({ productId, onSave }: Props) {
         toast.success("Product created successfully!");
         setForm(emptyForm);
       }
+      clearDraft();
       onSave?.();
     } catch (err) {
       toast.error(getApiError(err));
@@ -949,6 +970,12 @@ export default function ProductForm({ productId, onSave }: Props) {
 
   return (
     <div className="max-w-4xl">
+      {restored && (
+        <div className="mb-4 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+          Picked up where you left off — restored your unsaved changes from
+          before.
+        </div>
+      )}
       {/* Back link */}
       <div className="flex items-center justify-between mb-5">
         <Link

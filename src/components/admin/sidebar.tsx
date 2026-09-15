@@ -80,6 +80,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
       { label: "Brands", href: "/admin/brands" },
       { label: "Inventory", href: "/admin/inventory" },
       { label: "Promotions", href: "/admin/promotions" },
+      // Delete Requests: ADMIN only — filtered in processedItems below
+      { label: "Delete Requests", href: "/admin/products/delete-requests" },
     ],
   },
 
@@ -308,6 +310,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const role = user?.role || "STAFF";
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingVoidCount, setPendingVoidCount] = useState(0);
+  const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
 
   // Load pending stock approval count — Admin only now sees the queue at all.
   const fetchPendingCount = () => {
@@ -322,10 +325,17 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       .then((r) => setPendingVoidCount(r.data?.count || 0))
       .catch(() => {});
   };
+  const fetchPendingDeleteCount = () => {
+    if (role !== "ADMIN") return;
+    apiGet<any>("/products/delete-requests/pending-count")
+      .then((r) => setPendingDeleteCount(r.data?.count || 0))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     fetchPendingCount();
     fetchPendingVoidCount();
+    fetchPendingDeleteCount();
   }, [role]);
 
   // These badges used to only fetch once on mount — approving/rejecting a
@@ -343,6 +353,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     const onChange = () => {
       fetchPendingCount();
       fetchPendingVoidCount();
+      fetchPendingDeleteCount();
     };
     window.addEventListener("pending-counts:refresh", onChange);
     const interval = setInterval(onChange, 30_000);
@@ -404,6 +415,27 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       return {
         ...item,
         children: item.children?.filter((c) => c.label !== "Add Product"),
+      };
+    }
+    // Delete Requests: ADMIN only — everyone else requests delete approval
+    // from an admin instead of seeing the review queue.
+    if (item.label === "Products" && role !== "ADMIN") {
+      return {
+        ...item,
+        children: item.children?.filter((c) => c.label !== "Delete Requests"),
+      };
+    }
+    if (item.label === "Products" && role === "ADMIN" && pendingDeleteCount > 0) {
+      return {
+        ...item,
+        children: item.children?.map((c) =>
+          c.label === "Delete Requests"
+            ? {
+                ...c,
+                label: `Delete Requests (${pendingDeleteCount > 99 ? "99+" : pendingDeleteCount})`,
+              }
+            : c,
+        ),
       };
     }
     return item;
