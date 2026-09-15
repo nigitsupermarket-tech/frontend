@@ -8,6 +8,7 @@ import {
   Search,
   Printer,
   Download,
+  Trash2,
   Loader2,
   RefreshCw,
   TrendingUp,
@@ -17,7 +18,7 @@ import {
   Monitor,
   X,
 } from "lucide-react";
-import { apiGet, getApiError } from "@/lib/api";
+import { apiGet, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { formatPrice, cn } from "@/lib/utils";
 import {
@@ -81,6 +82,33 @@ export default function POSOrdersPage() {
 
   const handleDownload = (order: POSOrder) => {
     downloadPosReceiptPdf(order, (message) => toast(message, "error"));
+  };
+
+  // Delete/cancel a SUSPENDED (held) order directly from the list — open
+  // to every POS role, no approval needed since a held order never had
+  // stock deducted or payment taken. See deleteSuspendedOrder on the
+  // backend (POS terminal's "Held Transactions" panel has the same
+  // action; this is the same endpoint from the full order history view).
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const handleDeleteSuspended = async (order: POSOrder) => {
+    if (
+      !window.confirm(
+        `Delete suspended order "${order.posOrderNumber}"? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingOrderId(order.id);
+    try {
+      await apiDelete(`/pos/orders/${order.id}/suspended`);
+      toast(`Order "${order.posOrderNumber}" deleted`, "success");
+      setOrders((prev) => prev.filter((o) => o.id !== order.id));
+      setPagination((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setDeletingOrderId(null);
+    }
   };
 
   const fetchOrders = useCallback(async () => {
@@ -331,6 +359,21 @@ export default function POSOrdersPage() {
                           >
                             <Download className="w-4 h-4" />
                           </button>
+                          {order.status === "SUSPENDED" && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSuspended(order)}
+                              disabled={deletingOrderId === order.id}
+                              className="p-1.5 text-red-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                              title="Delete this suspended order"
+                            >
+                              {deletingOrderId === order.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
