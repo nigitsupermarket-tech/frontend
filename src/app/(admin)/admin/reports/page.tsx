@@ -70,6 +70,19 @@ function pdfPrice(amount: number): string {
   return `NGN ${amount.toLocaleString("en-NG")}`;
 }
 
+// Weighed/scalable products (deli meats, produce, anything sold by
+// kg/g/L/cup/custom rather than by the piece) report their sold quantity
+// as a decimal — 0.26 means 260g, not "0.26 of an item". Without the unit
+// attached, that reads as a broken number rather than a real weight, so
+// every quantity shown in the Product Sales tab appends the product's own
+// scaleUnit (captured on the sale itself — see scaleUnit in
+// report.controller.ts) when there is one. Ordinary by-the-piece products
+// have no scaleUnit and just show the bare count, unchanged.
+function formatQty(qty: number, scaleUnit?: string | null): string {
+  const rounded = Number.isInteger(qty) ? qty : Number(qty.toFixed(3));
+  return scaleUnit ? `${rounded} ${scaleUnit}` : `${rounded}`;
+}
+
 const PAGE_SIZE = 20;
 // PDF export pulls the whole filtered range in one call rather than
 // paging through it — this just needs to stay under the backend's cap
@@ -141,6 +154,19 @@ export default function ReportsPage() {
     "product-sales": 1,
   });
   const [tabData, setTabData] = useState<any>(null);
+  // Which tab `tabData` actually belongs to. Needed because `activeTab`
+  // changes synchronously on click, but the fetch that repopulates
+  // `tabData` for the new tab runs in a useEffect a tick later — for that
+  // one render, `tabData` would otherwise still hold the PREVIOUS tab's
+  // shape (e.g. Activity Log's `{total, byAction, ...}`, which has no
+  // `totalRevenue`) while `tab` already says "product-sales". Passing
+  // that mismatched object into a tab's renderer that expects its own
+  // shape can throw mid-render (e.g. formatPrice() on an undefined
+  // field), which is exactly what caused the "Cannot read properties of
+  // null (reading 'removeChild')" crash — a render-time throw takes
+  // React's commit down with it. Gating on this instead of `tabLoading`
+  // closes that gap for every tab, not just the one that happened to hit it.
+  const [tabDataOwner, setTabDataOwner] = useState<string>("");
   const [tabLoading, setTabLoading] = useState(false);
   const [tabError, setTabError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -254,6 +280,13 @@ export default function ReportsPage() {
     ) => {
       setTabLoading(true);
       setTabError("");
+      // Immediately disown the currently-held tabData — it belongs to
+      // whatever tab was active before this call, never to `tab`. This is
+      // what actually closes the race: as soon as a tab switch/refetch
+      // starts, DetailTabPanel stops receiving data at all (falls back to
+      // its `!data` null-return) until this fetch's own result — for
+      // this exact `tab` — comes back and claims ownership below.
+      setTabDataOwner("");
       try {
         const params: Record<string, string> = {
           type: tab,
@@ -286,6 +319,7 @@ export default function ReportsPage() {
 
         const res = await apiGet<any>("/reports", params);
         setTabData(res.data?.[SECTION_KEY[tab]] ?? null);
+        setTabDataOwner(tab);
       } catch (e: any) {
         setTabError(getApiError(e));
       } finally {
@@ -617,9 +651,9 @@ export default function ReportsPage() {
           body: (productSales.entries || []).map((r: any) => [
             r.productName + (r.productExists ? "" : " (deleted)"),
             r.productSku,
-            r.onlineQty,
-            r.posQty,
-            r.totalQty,
+            formatQty(r.onlineQty, r.scaleUnit),
+            formatQty(r.posQty, r.scaleUnit),
+            formatQty(r.totalQty, r.scaleUnit),
             pdfPrice(r.totalRevenue),
           ]),
           styles: { fontSize: 8 },
@@ -890,7 +924,7 @@ export default function ReportsPage() {
         ) : (
           <DetailTabPanel
             tab={activeTab}
-            data={tabData}
+            data={tabDataOwner === activeTab ? tabData : null}
             page={pageByTab[activeTab] || 1}
             onPageChange={(p) => setTabPage(activeTab, p)}
             onViewProductDetail={(productId) => openProductDetail(productId, 1)}
@@ -1070,12 +1104,12 @@ function DetailTabPanel({
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <SummaryCard label="Distinct products sold" value={data.distinctProducts} />
-          <SummaryCard label="Total units sold" value={data.totalUnitsSold} />
+          <SummaryCard label="Distinct products sold" value={data.distinctProducts ?? 0} />
+          <SummaryCard label="Total units sold" value={data.totalUnitsSold ?? 0} />
           <SummaryCard
             label="Total revenue"
-            value={formatPriceCompact(data.totalRevenue)}
-            fullValue={formatPrice(data.totalRevenue)}
+            value={formatPriceCompact(data.totalRevenue ?? 0)}
+            fullValue={formatPrice(data.totalRevenue ?? 0)}
           />
         </div>
         <EntryTable
@@ -1099,17 +1133,25 @@ function DetailTabPanel({
               ),
             },
             { key: "productSku", label: "SKU" },
-            { key: "onlineQty", label: "Online Qty" },
-            { key: "posQty", label: "POS Qty" },
+            {
+              key: "onlineQty",
+              label: "Online Qty",
+              render: (r: any) => formatQty(r.onlineQty, r.scaleUnit),
+            },
+            {
+              key: "posQty",
+              label: "POS Qty",
+              render: (r: any) => formatQty(r.posQty, r.scaleUnit),
+            },
             {
               key: "totalQty",
               label: "Total Qty",
-              render: (r: any) => <strong>{r.totalQty}</strong>,
+              render: (r: any) => <strong>{formatQty(r.totalQty, r.scaleUnit)}</strong>,
             },
             {
               key: "totalRevenue",
               label: "Revenue",
-              render: (r: any) => formatPrice(r.totalRevenue),
+              render: (r: any) => formatPrice(r.totalRevenue ?? 0),
             },
             {
               key: "actions",
@@ -1310,8 +1352,9 @@ function ProductDetailModal({
             {detail && (
               <p className="text-xs text-gray-500 mt-0.5">
                 SKU {detail.productSku} · {detail.totalLines} sale
-                {detail.totalLines === 1 ? "" : "s"} · {detail.totalQty} units
-                total
+                {detail.totalLines === 1 ? "" : "s"} ·{" "}
+                {formatQty(detail.totalQty, detail.scaleUnit)}
+                {detail.scaleUnit ? "" : " units"} total
               </p>
             )}
           </div>
@@ -1359,11 +1402,15 @@ function ProductDetailModal({
                     </span>
                   ),
                 },
-                { key: "quantity", label: "Qty" },
+                {
+                  key: "quantity",
+                  label: "Qty",
+                  render: (r: any) => formatQty(r.quantity, r.scaleUnit),
+                },
                 {
                   key: "subtotal",
                   label: "Amount",
-                  render: (r: any) => formatPrice(r.subtotal),
+                  render: (r: any) => formatPrice(r.subtotal ?? 0),
                 },
                 { key: "soldByLabel", label: "Who" },
               ]}
