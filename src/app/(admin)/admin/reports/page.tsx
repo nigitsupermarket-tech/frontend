@@ -13,6 +13,7 @@ import {
   ShoppingCart,
   Store,
   Activity as ActivityIcon,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -38,6 +39,7 @@ const DETAIL_TABS = [
   { value: "stock", label: "Stock Movement", icon: Package },
   { value: "stock-approvals", label: "Stock Approvals", icon: ClipboardCheck },
   { value: "activity", label: "Activity Log", icon: ActivityIcon },
+  { value: "product-sales", label: "Product Sales", icon: BarChart3 },
 ];
 
 // The /reports endpoint always nests a type's data under its section key
@@ -47,6 +49,7 @@ const SECTION_KEY: Record<string, string> = {
   stock: "stock",
   "stock-approvals": "stockApprovals",
   activity: "activity",
+  "product-sales": "productSales",
 };
 
 const INTERVALS = [
@@ -135,6 +138,7 @@ export default function ReportsPage() {
     stock: 1,
     "stock-approvals": 1,
     activity: 1,
+    "product-sales": 1,
   });
   const [tabData, setTabData] = useState<any>(null);
   const [tabLoading, setTabLoading] = useState(false);
@@ -154,6 +158,49 @@ export default function ReportsPage() {
   // keystroke; it only takes effect on Enter or the Search button.
   const [productQuery, setProductQuery] = useState("");
   const [appliedProduct, setAppliedProduct] = useState("");
+
+  // Product Sales tab — drill-down into every individual line that sold a
+  // given product (who bought/rang it up, when, how much). Fetched
+  // on-demand per product rather than as part of the tab's own page load.
+  const [productDetail, setProductDetail] = useState<any>(null);
+  const [productDetailLoading, setProductDetailLoading] = useState(false);
+  const [productDetailError, setProductDetailError] = useState("");
+  const [productDetailPage, setProductDetailPage] = useState(1);
+
+  const openProductDetail = useCallback(
+    async (productId: string, page = 1) => {
+      setProductDetailLoading(true);
+      setProductDetailError("");
+      setProductDetailPage(page);
+      try {
+        const params: Record<string, string> = {
+          type: "product-sales-detail",
+          productId,
+          interval: applied.interval,
+          page: String(page),
+          limit: String(PAGE_SIZE),
+        };
+        if (applied.interval === "custom") {
+          params.from = applied.from;
+          params.to = applied.to;
+        }
+        if (isPrivileged && applied.userId) params.userId = applied.userId;
+
+        const res = await apiGet<any>("/reports", params);
+        setProductDetail(res.data?.productSalesDetail ?? null);
+      } catch (e: any) {
+        setProductDetailError(getApiError(e));
+      } finally {
+        setProductDetailLoading(false);
+      }
+    },
+    [applied, isPrivileged],
+  );
+
+  const closeProductDetail = () => {
+    setProductDetail(null);
+    setProductDetailError("");
+  };
 
   useEffect(() => {
     if (!isPrivileged) return;
@@ -223,11 +270,15 @@ export default function ReportsPage() {
           params.to = filters.to;
         }
         if (isPrivileged && filters.userId) params.userId = filters.userId;
-        // Sales-channel filter only applies to the stock-movement tab.
-        if (tab === "stock" && source !== "all") params.source = source;
-        // Product search applies to both stock-related tabs.
+        // Sales-channel filter applies to stock-movement AND product-sales.
+        if ((tab === "stock" || tab === "product-sales") && source !== "all") {
+          params.source = source;
+        }
+        // Product search applies to all three product-scoped tabs.
         if (
-          (tab === "stock" || tab === "stock-approvals") &&
+          (tab === "stock" ||
+            tab === "stock-approvals" ||
+            tab === "product-sales") &&
           productFilter.trim()
         ) {
           params.product = productFilter.trim();
@@ -273,7 +324,7 @@ export default function ReportsPage() {
     }
     // Changing the filters restarts pagination on every tab so nobody is
     // looking at page 4 of a completely different date range.
-    setPageByTab({ stock: 1, "stock-approvals": 1, activity: 1 });
+    setPageByTab({ stock: 1, "stock-approvals": 1, activity: 1, "product-sales": 1 });
     setApplied({
       interval,
       from,
@@ -288,18 +339,28 @@ export default function ReportsPage() {
 
   const handleStockSourceChange = (source: "all" | "online" | "pos") => {
     setStockSource(source);
-    setPageByTab((prev) => ({ ...prev, stock: 1 }));
+    setPageByTab((prev) => ({ ...prev, stock: 1, "product-sales": 1 }));
   };
 
   const applyProductSearch = () => {
     setAppliedProduct(productQuery.trim());
-    setPageByTab((prev) => ({ ...prev, stock: 1, "stock-approvals": 1 }));
+    setPageByTab((prev) => ({
+      ...prev,
+      stock: 1,
+      "stock-approvals": 1,
+      "product-sales": 1,
+    }));
   };
 
   const clearProductSearch = () => {
     setProductQuery("");
     setAppliedProduct("");
-    setPageByTab((prev) => ({ ...prev, stock: 1, "stock-approvals": 1 }));
+    setPageByTab((prev) => ({
+      ...prev,
+      stock: 1,
+      "stock-approvals": 1,
+      "product-sales": 1,
+    }));
   };
 
   const downloadPdf = async () => {
@@ -321,24 +382,32 @@ export default function ReportsPage() {
       }
       if (isPrivileged && applied.userId) baseParams.userId = applied.userId;
 
-      const [stockRes, approvalsRes, activityRes] = await Promise.all([
-        apiGet<any>("/reports", {
-          ...baseParams,
-          type: "stock",
-          ...(stockSource !== "all" ? { source: stockSource } : {}),
-          ...(appliedProduct ? { product: appliedProduct } : {}),
-        }),
-        apiGet<any>("/reports", {
-          ...baseParams,
-          type: "stock-approvals",
-          ...(appliedProduct ? { product: appliedProduct } : {}),
-        }),
-        apiGet<any>("/reports", { ...baseParams, type: "activity" }),
-      ]);
+      const [stockRes, approvalsRes, activityRes, productSalesRes] =
+        await Promise.all([
+          apiGet<any>("/reports", {
+            ...baseParams,
+            type: "stock",
+            ...(stockSource !== "all" ? { source: stockSource } : {}),
+            ...(appliedProduct ? { product: appliedProduct } : {}),
+          }),
+          apiGet<any>("/reports", {
+            ...baseParams,
+            type: "stock-approvals",
+            ...(appliedProduct ? { product: appliedProduct } : {}),
+          }),
+          apiGet<any>("/reports", { ...baseParams, type: "activity" }),
+          apiGet<any>("/reports", {
+            ...baseParams,
+            type: "product-sales",
+            ...(stockSource !== "all" ? { source: stockSource } : {}),
+            ...(appliedProduct ? { product: appliedProduct } : {}),
+          }),
+        ]);
 
       const stock = stockRes.data?.stock;
       const approvals = approvalsRes.data?.stockApprovals;
       const activity = activityRes.data?.activity;
+      const productSales = productSalesRes.data?.productSales;
 
       const { meta, sales, pos } = report;
       const doc = new jsPDF();
@@ -509,6 +578,49 @@ export default function ReportsPage() {
             r.userName || "System",
             r.action,
             r.entity || "—",
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [22, 101, 52] },
+        });
+      }
+
+      // ── Product Sales ─────────────────────────────────────────────────
+      // Reads from OrderItem/POSOrderItem's own snapshot fields, so this
+      // table keeps reporting units sold for a product even after it's
+      // been hard-deleted (see buildProductSalesSection).
+      if (productSales) {
+        y = (doc as any).lastAutoTable.finalY + 10;
+        if (y > 260) {
+          doc.addPage();
+          y = 16;
+        }
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        const sourceLabel =
+          stockSource === "online"
+            ? " — Online Orders"
+            : stockSource === "pos"
+              ? " — POS"
+              : "";
+        doc.text(
+          `Product Sales (${productSales.distinctProducts} products, ${productSales.totalUnitsSold} units)${sourceLabel}${appliedProduct ? ` — "${appliedProduct}"` : ""}`,
+          14,
+          y,
+        );
+        y += 4;
+        autoTable(doc, {
+          startY: y,
+          margin: { left: 14, right: 14 },
+          head: [
+            ["Product", "SKU", "Online Qty", "POS Qty", "Total Qty", "Revenue"],
+          ],
+          body: (productSales.entries || []).map((r: any) => [
+            r.productName + (r.productExists ? "" : " (deleted)"),
+            r.productSku,
+            r.onlineQty,
+            r.posQty,
+            r.totalQty,
+            pdfPrice(r.totalRevenue),
           ]),
           styles: { fontSize: 8 },
           headStyles: { fillColor: [22, 101, 52] },
@@ -702,10 +814,11 @@ export default function ReportsPage() {
             })}
           </div>
 
-          {/* Sales-channel filter — only meaningful on the stock-movement
-              tab (InventoryLog rows are tagged ONLINE_SALE/ONLINE_RETURN
-              for the website, POS_SALE/RETURN for in-store). */}
-          {activeTab === "stock" && (
+          {/* Sales-channel filter — meaningful on stock-movement
+              (InventoryLog rows are tagged ONLINE_SALE/ONLINE_RETURN for
+              the website, POS_SALE/RETURN for in-store) and on
+              product-sales (splits units sold by channel the same way). */}
+          {(activeTab === "stock" || activeTab === "product-sales") && (
             <div className="flex rounded-xl border border-gray-200 overflow-hidden">
               {(
                 [
@@ -732,8 +845,10 @@ export default function ReportsPage() {
 
         {/* Product search — find a single product's full inventory
             history: every addition, sale (online or POS), adjustment, and
-            who was involved. Available on both stock-related tabs. */}
-        {(activeTab === "stock" || activeTab === "stock-approvals") && (
+            who was involved. Available on all three product-scoped tabs. */}
+        {(activeTab === "stock" ||
+          activeTab === "stock-approvals" ||
+          activeTab === "product-sales") && (
           <div className="flex items-center gap-2">
             <div className="relative flex-1 max-w-sm">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -778,9 +893,25 @@ export default function ReportsPage() {
             data={tabData}
             page={pageByTab[activeTab] || 1}
             onPageChange={(p) => setTabPage(activeTab, p)}
+            onViewProductDetail={(productId) => openProductDetail(productId, 1)}
           />
         )}
       </div>
+
+      {/* Product Sales drill-down — every individual sale line for one
+          product, with who bought/rang it up. */}
+      {(productDetail || productDetailLoading || productDetailError) && (
+        <ProductDetailModal
+          detail={productDetail}
+          loading={productDetailLoading}
+          error={productDetailError}
+          page={productDetailPage}
+          onPageChange={(p) =>
+            productDetail && openProductDetail(productDetail.productId, p)
+          }
+          onClose={closeProductDetail}
+        />
+      )}
     </div>
   );
 }
@@ -853,11 +984,13 @@ function DetailTabPanel({
   data,
   page,
   onPageChange,
+  onViewProductDetail,
 }: {
   tab: string;
   data: any;
   page: number;
   onPageChange: (page: number) => void;
+  onViewProductDetail: (productId: string) => void;
 }) {
   if (!data) return null;
 
@@ -922,6 +1055,74 @@ function DetailTabPanel({
             { key: "requestedQty", label: "Requested" },
             { key: "status", label: "Status" },
             { key: "reviewedByName", label: "Reviewed by" },
+          ]}
+        />
+        <Pagination
+          pagination={data.pagination}
+          page={page}
+          onPageChange={onPageChange}
+        />
+      </div>
+    );
+  }
+
+  if (tab === "product-sales") {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <SummaryCard label="Distinct products sold" value={data.distinctProducts} />
+          <SummaryCard label="Total units sold" value={data.totalUnitsSold} />
+          <SummaryCard
+            label="Total revenue"
+            value={formatPriceCompact(data.totalRevenue)}
+            fullValue={formatPrice(data.totalRevenue)}
+          />
+        </div>
+        <EntryTable
+          rows={data.entries}
+          columns={[
+            {
+              key: "productName",
+              label: "Product",
+              render: (r: any) => (
+                <span className="flex items-center gap-1.5">
+                  {r.productName}
+                  {!r.productExists && (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700"
+                      title="This product has since been deleted — figures are preserved from sale-time records"
+                    >
+                      Deleted
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            { key: "productSku", label: "SKU" },
+            { key: "onlineQty", label: "Online Qty" },
+            { key: "posQty", label: "POS Qty" },
+            {
+              key: "totalQty",
+              label: "Total Qty",
+              render: (r: any) => <strong>{r.totalQty}</strong>,
+            },
+            {
+              key: "totalRevenue",
+              label: "Revenue",
+              render: (r: any) => formatPrice(r.totalRevenue),
+            },
+            {
+              key: "actions",
+              label: "",
+              render: (r: any) => (
+                <button
+                  onClick={() => onViewProductDetail(r.productId)}
+                  className="text-brand-600 hover:text-brand-700 text-xs font-semibold whitespace-nowrap"
+                >
+                  View Details
+                </button>
+              ),
+            },
           ]}
         />
         <Pagination
@@ -1065,6 +1266,116 @@ function EntryTable({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Product Sales drill-down modal — every individual line that sold one
+// product, with who was involved (cashier for POS, buyer for online).
+// Opened from the "View Details" action on the Product Sales tab.
+function ProductDetailModal({
+  detail,
+  loading,
+  error,
+  page,
+  onPageChange,
+  onClose,
+}: {
+  detail: any;
+  loading: boolean;
+  error: string;
+  page: number;
+  onPageChange: (page: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-gray-900">
+              {detail?.productName || "Product sales"}
+              {detail && !detail.productExists && (
+                <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700 align-middle">
+                  Deleted
+                </span>
+              )}
+            </h2>
+            {detail && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                SKU {detail.productSku} · {detail.totalLines} sale
+                {detail.totalLines === 1 ? "" : "s"} · {detail.totalQty} units
+                total
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-3">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="py-10 flex justify-center">
+            <PageLoader />
+          </div>
+        ) : detail ? (
+          <>
+            <EntryTable
+              rows={detail.entries}
+              columns={[
+                {
+                  key: "date",
+                  label: "Date",
+                  render: (r: any) => formatDateTime(r.date),
+                },
+                { key: "reference", label: "Order #" },
+                {
+                  key: "channel",
+                  label: "Channel",
+                  render: (r: any) => (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        r.channel === "pos"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-purple-100 text-purple-700"
+                      }`}
+                    >
+                      {r.channel === "pos" ? "POS" : "Online"}
+                    </span>
+                  ),
+                },
+                { key: "quantity", label: "Qty" },
+                {
+                  key: "subtotal",
+                  label: "Amount",
+                  render: (r: any) => formatPrice(r.subtotal),
+                },
+                { key: "soldByLabel", label: "Who" },
+              ]}
+            />
+            <Pagination
+              pagination={detail.pagination}
+              page={page}
+              onPageChange={onPageChange}
+            />
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
