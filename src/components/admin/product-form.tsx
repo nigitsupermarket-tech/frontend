@@ -273,6 +273,11 @@ export default function ProductForm({ productId, onSave }: Props) {
     }
   }, [productId, user?.role]);
   const [isLoading, setIsLoading] = useState(!!productId);
+  // Set when the loaded product currently has a PENDING hard-delete
+  // request against it (see requestProductDelete) — shown as a banner so
+  // whoever opens this page understands why it's frozen off the
+  // storefront/POS, without needing to go check the delete-requests queue.
+  const [isFrozenForDeletion, setIsFrozenForDeletion] = useState(false);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -314,8 +319,14 @@ export default function ProductForm({ productId, onSave }: Props) {
         setBrands(brandsRes.data.brands);
 
         if (productId) {
-          const res = await apiGet<any>(`/products/${productId}`);
+          // includeFrozen: this is the admin edit page — it needs to open
+          // even if the product is currently frozen by a pending
+          // hard-delete request (see requestProductDelete), not 404.
+          const res = await apiGet<any>(`/products/${productId}`, {
+            includeFrozen: "true",
+          });
           const p = res.data.product;
+          setIsFrozenForDeletion(!!p.pendingDeleteRequest);
 
           const media: MediaItem[] = (p.images || []).map((url: string) => ({
             url,
@@ -813,7 +824,9 @@ export default function ProductForm({ productId, onSave }: Props) {
       // edits (name, price, a variation's label/price/etc.) still save
       // immediately; only the stock number itself is gated.
       if (!isAdmin && productId) {
-        const originalRes = await apiGet<any>(`/products/${productId}`);
+        const originalRes = await apiGet<any>(`/products/${productId}`, {
+          includeFrozen: "true",
+        });
         const originalProduct = originalRes.data?.product;
         const originalQty: number = originalProduct?.stockQuantity ?? 0;
         const newQty = Number(form.stockQuantity);
@@ -974,6 +987,13 @@ export default function ProductForm({ productId, onSave }: Props) {
         <div className="mb-4 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
           Picked up where you left off — restored your unsaved changes from
           before.
+        </div>
+      )}
+      {isFrozenForDeletion && (
+        <div className="mb-4 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800">
+          A hard-delete request for this product is pending admin approval.
+          It's currently hidden from the storefront and can't be sold
+          through POS until the request is approved or rejected.
         </div>
       )}
       {/* Back link */}

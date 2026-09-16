@@ -92,6 +92,11 @@ export interface Product {
   status: "ACTIVE" | "DRAFT" | "OUT_OF_STOCK" | "DISCONTINUED";
   isFeatured: boolean;
   isNewArrival: boolean;
+  // True while a STAFF/MANAGER hard-delete request is pending admin
+  // review — see the delete-requests approval workflow. Only present
+  // when the caller passed ?includeFrozen=true and is staff-side;
+  // otherwise a frozen product simply won't be in the response at all.
+  pendingDeleteRequest?: boolean;
 
   // Dimensions
   weight?: number;

@@ -112,6 +112,22 @@ export default function AdminProductsPage() {
   > | null>(null);
   const [loadingRelated, setLoadingRelated] = useState(false);
 
+  // Products with a pending stock-update approval — cross-referenced by
+  // id to show a "Stock update pending approval" badge per row. Product
+  // deletion status doesn't need a separate fetch: it comes back directly
+  // on each product as `pendingDeleteRequest` since this page passes
+  // includeFrozen=true below (an admin/staff management view, unlike the
+  // storefront or POS, needs to see frozen products, not just hide them).
+  const [pendingStockProductIds, setPendingStockProductIds] = useState<
+    Set<string>
+  >(new Set());
+
+  const fetchPendingStockProductIds = useCallback(() => {
+    apiGet<any>("/stock-approvals/pending-product-ids")
+      .then((r) => setPendingStockProductIds(new Set(r.data?.productIds || [])))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     apiGet<any>("/categories?limit=200")
       .then((r) => setCategories(r.data?.categories || []))
@@ -119,14 +135,32 @@ export default function AdminProductsPage() {
     apiGet<any>("/brands?limit=200")
       .then((r) => setBrands(r.data?.brands || []))
       .catch(() => {});
-  }, []);
+    fetchPendingStockProductIds();
+    // Same "some other page just approved/rejected something" signal the
+    // sidebar badges already listen for — see stock-approvals/page.tsx
+    // and delete-requests/page.tsx, which both dispatch this.
+    window.addEventListener("pending-counts:refresh", fetchPendingStockProductIds);
+    return () =>
+      window.removeEventListener(
+        "pending-counts:refresh",
+        fetchPendingStockProductIds,
+      );
+  }, [fetchPendingStockProductIds]);
 
   const fetchProducts = useCallback(
     async (p = page, f = filters) => {
       setIsLoading(true);
       setError(null);
       try {
-        const params: any = { page: p, limit: 20, sort: f.sort };
+        const params: any = {
+          page: p,
+          limit: 20,
+          sort: f.sort,
+          // This is the admin management list — unlike the storefront or
+          // POS, it needs to SEE a product currently frozen by a pending
+          // delete request (with a label), not have it silently excluded.
+          includeFrozen: "true",
+        };
         params.status = f.status || "all"; // "all" bypasses the ACTIVE-only filter
         if (f.search) params.search = f.search;
         if (f.categoryId) params.categoryId = f.categoryId;
@@ -474,6 +508,21 @@ export default function AdminProductsPage() {
                           <p className="text-xs text-gray-400">
                             {product.category?.name}
                           </p>
+                          {(pendingStockProductIds.has(product.id) ||
+                            product.pendingDeleteRequest) && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {pendingStockProductIds.has(product.id) && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">
+                                  Stock update pending approval
+                                </span>
+                              )}
+                              {product.pendingDeleteRequest && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">
+                                  Deletion pending approval
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -547,15 +596,23 @@ export default function AdminProductsPage() {
                           <Edit2 className="w-4 h-4" />
                         </Link>
                         {/* Only ADMIN and MANAGER can see/perform hard delete */}
-                        {canOpenDeleteFlow && (
-                          <button
-                            onClick={() => requestDelete(product)}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        {canOpenDeleteFlow &&
+                          (product.pendingDeleteRequest ? (
+                            <span
+                              className="p-1.5 text-gray-300 cursor-not-allowed"
+                              title="A delete request is already pending admin approval"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => requestDelete(product)}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ))}
                       </div>
                     </td>
                   </tr>

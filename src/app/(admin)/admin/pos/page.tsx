@@ -1059,6 +1059,21 @@ function POSPageInner() {
   const searchRef = useRef<HTMLInputElement>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
+  // ── Auto-scroll the cart to the newly-added item ────────────────────────
+  // With a long cart, a cashier scanning item after item shouldn't have to
+  // manually scroll down each time to confirm the last scan landed —
+  // scroll to the bottom whenever the cart grows (an actual add), but NOT
+  // on every re-render (adjusting an existing line's qty/discount, or
+  // removing an item, shouldn't yank the view).
+  const cartListRef = useRef<HTMLDivElement>(null);
+  const prevCartLengthRef = useRef(0);
+  useEffect(() => {
+    if (cart.length > prevCartLengthRef.current && cartListRef.current) {
+      cartListRef.current.scrollTop = cartListRef.current.scrollHeight;
+    }
+    prevCartLengthRef.current = cart.length;
+  }, [cart.length]);
+
   // ── Camera barcode scanner state ──────────────────────────────────────────
   const [showCameraScanner, setShowCameraScanner] = useState(false);
   // Drives the "Scanner ready" indicator next to the barcode box — purely
@@ -2400,7 +2415,7 @@ function POSPageInner() {
           </div>
 
           {/* Cart items */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={cartListRef} className="flex-1 overflow-y-auto">
             {cart.length === 0 ? (
               <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                 Cart is empty
