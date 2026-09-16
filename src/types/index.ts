@@ -96,7 +96,7 @@ export interface Product {
   // review — see the delete-requests approval workflow. Only present
   // when the caller passed ?includeFrozen=true and is staff-side;
   // otherwise a frozen product simply won't be in the response at all.
-  pendingDeleteRequest?: boolean;
+  pendingDeleteRequest?: boolean | null;
 
   // Dimensions
   weight?: number;

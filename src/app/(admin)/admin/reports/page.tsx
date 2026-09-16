@@ -194,14 +194,14 @@ export default function ReportsPage() {
   const [productDetailPage, setProductDetailPage] = useState(1);
 
   const openProductDetail = useCallback(
-    async (productId: string, page = 1) => {
+    async (sku: string, page = 1) => {
       setProductDetailLoading(true);
       setProductDetailError("");
       setProductDetailPage(page);
       try {
         const params: Record<string, string> = {
           type: "product-sales-detail",
-          productId,
+          sku,
           interval: applied.interval,
           page: String(page),
           limit: String(PAGE_SIZE),
@@ -927,7 +927,7 @@ export default function ReportsPage() {
             data={tabDataOwner === activeTab ? tabData : null}
             page={pageByTab[activeTab] || 1}
             onPageChange={(p) => setTabPage(activeTab, p)}
-            onViewProductDetail={(productId) => openProductDetail(productId, 1)}
+            onViewProductDetail={(sku) => openProductDetail(sku, 1)}
           />
         )}
       </div>
@@ -941,7 +941,7 @@ export default function ReportsPage() {
           error={productDetailError}
           page={productDetailPage}
           onPageChange={(p) =>
-            productDetail && openProductDetail(productDetail.productId, p)
+            productDetail && openProductDetail(productDetail.productSku, p)
           }
           onClose={closeProductDetail}
         />
@@ -1024,7 +1024,7 @@ function DetailTabPanel({
   data: any;
   page: number;
   onPageChange: (page: number) => void;
-  onViewProductDetail: (productId: string) => void;
+  onViewProductDetail: (sku: string) => void;
 }) {
   if (!data) return null;
 
@@ -1158,7 +1158,7 @@ function DetailTabPanel({
               label: "",
               render: (r: any) => (
                 <button
-                  onClick={() => onViewProductDetail(r.productId)}
+                  onClick={() => onViewProductDetail(r.productSku)}
                   className="text-brand-600 hover:text-brand-700 text-xs font-semibold whitespace-nowrap"
                 >
                   View Details
