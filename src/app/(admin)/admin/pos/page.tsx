@@ -994,16 +994,14 @@ function POSPageInner() {
   // rebuilt cart isn't immediately confused with a brand-new session.
   // Cleared inside clearCart() below — the same choke point already hit
   // on both "sale completed" and "transaction held" success paths.
-  const { restored: cartRestored, clearDraft: clearCartDraft } = useDraftSync(
-    {
-      key: "pos-cart",
-      state: cart,
-      enabled: !sessionLoading && !!session,
-      restoreWhen: !sessionLoading,
-      shouldRestore: (payload) => Array.isArray(payload) && payload.length > 0,
-      onRestore: (payload) => setCart(payload),
-    },
-  );
+  const { restored: cartRestored, clearDraft: clearCartDraft } = useDraftSync({
+    key: "pos-cart",
+    state: cart,
+    enabled: !sessionLoading && !!session,
+    restoreWhen: !sessionLoading,
+    shouldRestore: (payload) => Array.isArray(payload) && payload.length > 0,
+    onRestore: (payload) => setCart(payload),
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -1293,7 +1291,7 @@ function POSPageInner() {
   const handleBarcode = async (code: string) => {
     if (!code.trim()) return;
 
-    // ── Scale-printed barcode: resolved entirely from the local cache — 
+    // ── Scale-printed barcode: resolved entirely from the local cache —
     // the weight is decoded from the digits themselves and the product
     // match only needs scaleWareCode, both already on-device. Falls back
     // to the network only if the cache has no candidate at all (e.g. a
@@ -1335,7 +1333,10 @@ function POSPageInner() {
     // network round trip if we're actually online — offline, there's
     // nothing more to check, so fail fast instead of hanging.
     if (!catalogSync.isOnline) {
-      toast(`No product for barcode: ${code} (offline — will retry once back online)`, "error");
+      toast(
+        `No product for barcode: ${code} (offline — will retry once back online)`,
+        "error",
+      );
       resetBarcodeInput();
       return;
     }
@@ -1890,8 +1891,7 @@ function POSPageInner() {
         productSku: item.product.sku,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
-        subtotal:
-          item.unitPrice * item.quantity * (1 - item.discount / 100),
+        subtotal: item.unitPrice * item.quantity * (1 - item.discount / 100),
         discountApplied: item.discount,
         netWeight: item.product.netWeight,
         scaleUnit: item.product.isScalable
@@ -2462,8 +2462,13 @@ function POSPageInner() {
           )}
         </div>
 
-        {/* ── RIGHT: Cart ── */}
-        <div className="w-[420px] flex-shrink-0 flex flex-col bg-white overflow-hidden">
+        {/* ── RIGHT: Cart ──
+            Width is 3/7 of the layout (up from the previous fixed
+            420px, ≈1/3 on a typical screen) — left panel is flex-1, so
+            it naturally takes the remaining 4/7. min-w keeps the cart
+            from getting crushed narrower than the old 420px on small
+            windows. */}
+        <div className="w-[42.8571%] min-w-[420px] flex-shrink-0 flex flex-col bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-4 h-4 text-gray-600" />
