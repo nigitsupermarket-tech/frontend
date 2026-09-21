@@ -141,6 +141,66 @@ function reqToPromise<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
+// ─── In-memory hot path ─────────────────────────────────────────────────────
+//
+// BUG FIX ("scans work, then intermittently take a while") — IndexedDB
+// serializes overlapping transactions on the same object store: a
+// readwrite transaction (the background catalog sync writing products)
+// and a readonly transaction (a barcode lookup) that touch the same
+// store get queued in order, not run in parallel. A lookup that happens
+// to land while a sync's write transaction is still committing sits in
+// that queue until the write finishes — which is exactly the
+// "scans immediately, except sometimes, then after a delay" symptom.
+//
+// Fix: IndexedDB is now ONLY for persistence across app restarts.
+// Every actual lookup (barcode, scale barcode, search) reads from a
+// plain in-memory Map, which is synchronous JS and literally cannot be
+// blocked by an async IDB transaction running elsewhere. Writes update
+// the Map immediately (in the same tick) and persist to IndexedDB in
+// the background; reads never wait on that persistence.
+let memProducts: Map<string, CachedProduct> = new Map();
+let memBarcodeIndex: Map<string, { productId: string; variationId: string | null }> = new Map();
+let memReady = false;
+let memReadyPromise: Promise<void> | null = null;
+
+async function ensureMemoryLoaded(): Promise<void> {
+  if (memReady) return;
+  if (memReadyPromise) return memReadyPromise;
+
+  memReadyPromise = (async () => {
+    try {
+      await tx([STORE_PRODUCTS], "readonly", (t) => {
+        return new Promise<void>((resolve, reject) => {
+          const req = t.objectStore(STORE_PRODUCTS).openCursor();
+          req.onsuccess = () => {
+            const cursor = req.result;
+            if (!cursor) return resolve();
+            const p: CachedProduct = cursor.value;
+            memProducts.set(p.id, p);
+            if (p.barcode) {
+              memBarcodeIndex.set(p.barcode, { productId: p.id, variationId: null });
+            }
+            for (const v of p.variations || []) {
+              if (v.barcode && v.isActive) {
+                memBarcodeIndex.set(v.barcode, { productId: p.id, variationId: v.id });
+              }
+            }
+            cursor.continue();
+          };
+          req.onerror = () => reject(req.error);
+        });
+      });
+    } catch {
+      // IndexedDB unavailable/empty — memory just starts empty, first
+      // sync (network permitting) will populate it.
+    } finally {
+      memReady = true;
+    }
+  })();
+
+  return memReadyPromise;
+}
+
 // ─── Meta (lastSyncedAt cursor) ─────────────────────────────────────────────
 
 async function getMeta(key: string): Promise<string | null> {
@@ -170,16 +230,38 @@ function isSellable(p: CachedProduct): boolean {
 
 async function upsertProducts(products: CachedProduct[]): Promise<void> {
   if (products.length === 0) return;
+  await ensureMemoryLoaded();
 
+  // 1) Update the in-memory maps synchronously, right now — this is what
+  //    lookups actually read, so the cache is "live" the instant this
+  //    loop finishes, regardless of how long the IndexedDB write below
+  //    takes to land.
+  for (const p of products) {
+    if (!isSellable(p)) {
+      memProducts.delete(p.id);
+      if (p.barcode) memBarcodeIndex.delete(p.barcode);
+      for (const v of p.variations || []) {
+        if (v.barcode) memBarcodeIndex.delete(v.barcode);
+      }
+      continue;
+    }
+    memProducts.set(p.id, p);
+    if (p.barcode) memBarcodeIndex.set(p.barcode, { productId: p.id, variationId: null });
+    for (const v of p.variations || []) {
+      if (v.barcode && v.isActive) {
+        memBarcodeIndex.set(v.barcode, { productId: p.id, variationId: v.id });
+      }
+    }
+  }
+
+  // 2) Persist to IndexedDB in the background, purely so the cache
+  //    survives an app/browser restart — no lookup path touches this
+  //    transaction, so however long it takes never affects a scan.
   await tx([STORE_PRODUCTS, STORE_BARCODES], "readwrite", async (t) => {
     const productStore = t.objectStore(STORE_PRODUCTS);
     const barcodeStore = t.objectStore(STORE_BARCODES);
 
     for (const p of products) {
-      // A delta sync can bring back a product that used to be sellable and
-      // just went OUT_OF_STOCK/DRAFT/frozen — pull it (and its barcodes)
-      // out of the cache entirely rather than let a stale copy keep
-      // matching scans.
       if (!isSellable(p)) {
         productStore.delete(p.id);
         if (p.barcode) barcodeStore.delete(p.barcode);
@@ -188,7 +270,6 @@ async function upsertProducts(products: CachedProduct[]): Promise<void> {
         }
         continue;
       }
-
       productStore.put(p);
       if (p.barcode) {
         barcodeStore.put({ code: p.barcode, productId: p.id, variationId: null });
@@ -221,6 +302,7 @@ export async function syncCatalog(opts?: { force?: boolean }): Promise<SyncResul
 
   syncInFlight = (async () => {
     try {
+      await ensureMemoryLoaded();
       const lastSyncedAt = opts?.force ? null : await getMeta("lastSyncedAt");
       const url = lastSyncedAt
         ? `/pos/catalog?updatedSince=${encodeURIComponent(lastSyncedAt)}`
@@ -250,16 +332,11 @@ export async function getLastSyncedAt(): Promise<string | null> {
 }
 
 export async function getCachedProductCount(): Promise<number> {
-  try {
-    return await tx([STORE_PRODUCTS], "readonly", (t) =>
-      reqToPromise(t.objectStore(STORE_PRODUCTS).count()),
-    );
-  } catch {
-    return 0;
-  }
+  await ensureMemoryLoaded();
+  return memProducts.size;
 }
 
-// ─── Lookups (instant, no network) ─────────────────────────────────────────
+// ─── Lookups (instant, no network, no IndexedDB — pure in-memory) ──────────
 
 export interface LookupResult {
   product: CachedProduct;
@@ -267,29 +344,15 @@ export interface LookupResult {
 }
 
 export async function lookupByBarcode(code: string): Promise<LookupResult | null> {
-  try {
-    return await tx([STORE_PRODUCTS, STORE_BARCODES], "readonly", async (t) => {
-      const entry = await reqToPromise(
-        t.objectStore(STORE_BARCODES).get(code) as IDBRequest<
-          { code: string; productId: string; variationId: string | null } | undefined
-        >,
-      );
-      if (!entry) return null;
-
-      const product = await reqToPromise(
-        t.objectStore(STORE_PRODUCTS).get(entry.productId) as IDBRequest<CachedProduct | undefined>,
-      );
-      if (!product) return null;
-
-      const variation = entry.variationId
-        ? product.variations.find((v) => v.id === entry.variationId)
-        : undefined;
-
-      return { product, variation };
-    });
-  } catch {
-    return null;
-  }
+  await ensureMemoryLoaded();
+  const entry = memBarcodeIndex.get(code);
+  if (!entry) return null;
+  const product = memProducts.get(entry.productId);
+  if (!product) return null;
+  const variation = entry.variationId
+    ? product.variations.find((v) => v.id === entry.variationId)
+    : undefined;
+  return { product, variation };
 }
 
 // Mirrors the backend's resolveScaleBarcode field layout exactly:
@@ -305,27 +368,24 @@ export function isScaleBarcode(code: string): boolean {
 export async function lookupByScaleBarcode(
   code: string,
 ): Promise<{ product: CachedProduct; weightKg: number } | { error: ScaleBarcodeError }> {
+  await ensureMemoryLoaded();
   const wareCode = code.slice(0, 7);
   const weightGrams = parseInt(code.slice(7, 12), 10);
   const weightKg = weightGrams / 1000;
 
-  const candidates = await tx([STORE_PRODUCTS], "readonly", (t) =>
-    reqToPromise(
-      t.objectStore(STORE_PRODUCTS).index("scaleWareCode").getAll(wareCode) as IDBRequest<
-        CachedProduct[]
-      >,
-    ),
-  ).catch(() => [] as CachedProduct[]);
-
   // Every cached product is already ACTIVE/not-frozen (evicted otherwise),
   // so a hit here only needs the isScalable check — the "wrong status"
   // case can't happen from cache data, only from a genuinely unknown code.
-  const match = candidates.find((p) => p.isScalable);
-  if (match) return { product: match, weightKg };
+  let sameWareCodeAnyProduct: CachedProduct | undefined;
+  for (const p of memProducts.values()) {
+    if (p.scaleWareCode !== wareCode) continue;
+    if (p.isScalable) return { product: p, weightKg };
+    sameWareCodeAnyProduct = p;
+  }
 
-  if (candidates.length > 0) {
+  if (sameWareCodeAnyProduct) {
     return {
-      error: { reason: "not-scalable", wareCode, name: candidates[0].name },
+      error: { reason: "not-scalable", wareCode, name: sameWareCodeAnyProduct.name },
     };
   }
   return { error: { reason: "no-code", wareCode } };
@@ -335,28 +395,20 @@ export async function lookupByScaleBarcode(
 // first pass for the search box, and as the offline fallback when the
 // network search would otherwise hang.
 export async function searchLocal(query: string, limit = 10): Promise<CachedProduct[]> {
+  await ensureMemoryLoaded();
   const q = query.trim().toLowerCase();
   if (!q) return [];
 
   const results: CachedProduct[] = [];
-  await tx([STORE_PRODUCTS], "readonly", (t) => {
-    return new Promise<void>((resolve, reject) => {
-      const req = t.objectStore(STORE_PRODUCTS).openCursor();
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (!cursor || results.length >= limit) return resolve();
-        const p: CachedProduct = cursor.value;
-        if (
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          (p.barcode && p.barcode.toLowerCase().includes(q))
-        ) {
-          results.push(p);
-        }
-        cursor.continue();
-      };
-      req.onerror = () => reject(req.error);
-    });
-  });
+  for (const p of memProducts.values()) {
+    if (
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.barcode && p.barcode.toLowerCase().includes(q))
+    ) {
+      results.push(p);
+      if (results.length >= limit) break;
+    }
+  }
   return results;
 }

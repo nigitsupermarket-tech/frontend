@@ -544,46 +544,16 @@ function printAndClose(win: Window, onDone: () => void) {
       }
       win.focus();
 
-      // Inside the desktop app, this popup window has the same
-      // posDesktop bridge as the main window (see main.js's
-      // overrideBrowserWindowOptions for same-site popups), so print
-      // silently — no OS dialog, no manual printer selection. This is
-      // what actually fixes the Windows Print dialog you were seeing:
-      // window.print() in Electron opens that dialog by default, this
-      // bypasses it entirely and prints straight to the configured
-      // printer.
-      const desktop = (
-        win as unknown as {
-          posDesktop?: {
-            isDesktopApp: boolean;
-            silentPrint: () => Promise<{
-              success: boolean;
-              failureReason?: string;
-            }>;
-          };
-        }
-      ).posDesktop;
-      if (desktop?.isDesktopApp) {
-        desktop
-          .silentPrint()
-          .then(({ success, failureReason }) => {
-            if (!success) {
-              console.error(
-                `[posReceipt] Silent print failed: ${failureReason}`,
-              );
-            }
-            cleanup();
-          })
-          .catch((err) => {
-            console.error("[posReceipt] Silent print error:", err);
-            cleanup();
-          });
-        return;
-      }
-
-      // Normal browser tab (not the desktop app) — same as before:
-      // window.print() opens the browser's own print UI, and
-      // `afterprint` tells us when that's done.
+      // Whether this is the Electron desktop app or a plain browser tab,
+      // just call win.print() — same as it's always been. In the desktop
+      // app, preload.js overrides window.print globally (in every window
+      // it opens, this popup included) to route silently through IPC to
+      // the configured printer; no dialog, no branch needed here. This
+      // used to also check window.posDesktop.isDesktopApp and call
+      // posDesktop.silentPrint() directly — but preload.js never actually
+      // exposed a `silentPrint` method (only listProfiles/printerStatus/
+      // etc.), so that branch always threw, was swallowed by the catch
+      // below, and silently skipped printing entirely in the desktop app.
       window.addEventListener("afterprint", cleanup, { once: true });
       win.addEventListener("afterprint", cleanup, { once: true });
       win.print();
