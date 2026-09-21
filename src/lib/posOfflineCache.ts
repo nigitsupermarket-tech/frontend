@@ -158,8 +158,8 @@ function reqToPromise<T>(req: IDBRequest<T>): Promise<T> {
 // blocked by an async IDB transaction running elsewhere. Writes update
 // the Map immediately (in the same tick) and persist to IndexedDB in
 // the background; reads never wait on that persistence.
-let memProducts: Map<string, CachedProduct> = new Map();
-let memBarcodeIndex: Map<string, { productId: string; variationId: string | null }> = new Map();
+const memProducts: Map<string, CachedProduct> = new Map();
+const memBarcodeIndex: Map<string, { productId: string; variationId: string | null }> = new Map();
 let memReady = false;
 let memReadyPromise: Promise<void> | null = null;
 
