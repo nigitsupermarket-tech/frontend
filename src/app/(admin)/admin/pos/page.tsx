@@ -39,6 +39,14 @@ import { useToast } from "@/store/uiStore";
 import { formatPrice, formatScaleQty, getProductImage } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 import { useDraftSync } from "@/hooks/useDraftSync";
+import { useCatalogSync } from "@/hooks/useCatalogSync";
+import {
+  lookupByBarcode,
+  lookupByScaleBarcode,
+  isScaleBarcode,
+  searchLocal,
+  type ScaleBarcodeError,
+} from "@/lib/posOfflineCache";
 import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
 import ScalePanel from "@/components/admin/pos/ScalePanel";
 import WeighModal from "@/components/admin/pos/WeighModal";
@@ -952,10 +960,26 @@ export default function POSPage() {
   );
 }
 
+// Small "5m ago" formatter for the catalog-sync status line — deliberately
+// coarse (no seconds granularity) since it's a trust indicator, not a clock.
+function formatRelativeSync(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ago`;
+}
+
 function POSPageInner() {
   const { user } = useAuthStore();
   const scale = useScale();
   const toast = useToast();
+
+  // Offline product cache — see lib/posOfflineCache.ts. Keeps the full
+  // sellable catalog in IndexedDB so every scan/search resolves instantly
+  // off the local copy instead of waiting on the shop's connection.
+  const catalogSync = useCatalogSync();
 
   // Session state
   const [session, setSession] = useState<POSSession | null>(null);
@@ -1201,17 +1225,37 @@ function POSPageInner() {
   const splitTotal = splitPayments.reduce((s, p) => s + p.amount, 0);
   const splitRemaining = total - splitTotal;
 
+  // Converts a cached catalog record (IndexedDB shape, nulls allowed) into
+  // the `Product` shape the rest of this page already works with (string |
+  // undefined, no cache-only fields) — keeps the offline path a drop-in
+  // replacement for what the old network calls returned.
+  const fromCachedProduct = (p: any): Product => ({
+    ...p,
+    barcode: p.barcode ?? undefined,
+    scaleUnit: p.scaleUnit ?? undefined,
+    scaleStep: p.scaleStep ?? undefined,
+    scaleWareCode: p.scaleWareCode ?? undefined,
+    variations: (p.variations || []).map((v: any) => ({
+      ...v,
+      compareAtPrice: v.compareAtPrice ?? undefined,
+      barcode: v.barcode ?? undefined,
+      stockQuantity: v.stockQuantity ?? undefined,
+    })),
+  });
+
   const handleSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
       setSearchResults([]);
       return;
     }
+    // Instant, local — no network round trip, so this never lags no
+    // matter how bad the connection is. The catalog cache is kept fresh
+    // in the background by useCatalogSync, so this is the live catalog
+    // as of the last sync (seconds to a few minutes old at worst).
     setSearchLoading(true);
     try {
-      const res = await apiGet<any>(
-        `/products?search=${encodeURIComponent(q)}&status=ACTIVE&limit=10`,
-      );
-      setSearchResults(res.data.products || []);
+      const results = await searchLocal(q, 10);
+      setSearchResults(results.map(fromCachedProduct));
     } catch {
       setSearchResults([]);
     } finally {
@@ -1220,14 +1264,9 @@ function POSPageInner() {
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => handleSearch(searchQuery), 300);
+    const t = setTimeout(() => handleSearch(searchQuery), 120);
     return () => clearTimeout(t);
   }, [searchQuery, handleSearch]);
-
-  // A CECON scale-printed label barcode: 18 digits, [0:7]=scale ware code,
-  // [7:12]=weight in grams. See resolveScaleBarcode on the backend for the
-  // full field-layout notes (confirmed against real printed labels).
-  const SCALE_BARCODE_PATTERN = /^\d{18}$/;
 
   // Clears the scan box and puts the cursor straight back in it — a USB
   // scanner gun types into whatever's focused, so keeping focus here after
@@ -1240,19 +1279,64 @@ function POSPageInner() {
     }
   };
 
+  const scaleBarcodeErrorMessage = (err: ScaleBarcodeError): string => {
+    switch (err.reason) {
+      case "no-code":
+        return `No product has scale code "${err.wareCode}" set at all. Set its "Scale Ware Code" in the product editor to match what the scale prints.`;
+      case "not-scalable":
+        return `"${err.name}" has scale code "${err.wareCode}" set, but isn't marked as a scalable product — check "This product is sold by measurement/scale" on its Scale/Weight tab and save.`;
+      case "not-active":
+        return `"${err.name}" has scale code "${err.wareCode}" set, but its status is ${err.status}, not ACTIVE — only active products can be scanned at checkout.`;
+    }
+  };
+
   const handleBarcode = async (code: string) => {
     if (!code.trim()) return;
 
-    if (SCALE_BARCODE_PATTERN.test(code)) {
-      try {
-        const res = await apiGet<any>(`/pos/scale-barcode/${code}`);
-        const { product, weightKg } = res.data;
-        addWeighedToCart(product, weightKg);
-      } catch (err) {
-        toast(getApiError(err), "error");
-      } finally {
+    // ── Scale-printed barcode: resolved entirely from the local cache — 
+    // the weight is decoded from the digits themselves and the product
+    // match only needs scaleWareCode, both already on-device. Falls back
+    // to the network only if the cache has no candidate at all (e.g. a
+    // scale code assigned in the last few seconds, before the next sync).
+    if (isScaleBarcode(code)) {
+      const cached = await lookupByScaleBarcode(code);
+      if ("product" in cached) {
+        addWeighedToCart(fromCachedProduct(cached.product), cached.weightKg);
         resetBarcodeInput();
+        return;
       }
+      if (catalogSync.isOnline) {
+        try {
+          const res = await apiGet<any>(`/pos/scale-barcode/${code}`);
+          const { product, weightKg } = res.data;
+          addWeighedToCart(product, weightKg);
+        } catch (err) {
+          toast(getApiError(err), "error");
+        } finally {
+          resetBarcodeInput();
+        }
+        return;
+      }
+      toast(scaleBarcodeErrorMessage(cached.error), "error");
+      resetBarcodeInput();
+      return;
+    }
+
+    // ── Regular product/variation barcode — local cache first, instant.
+    const hit = await lookupByBarcode(code);
+    if (hit) {
+      addOrPickVariation(fromCachedProduct(hit.product), hit.variation as any);
+      resetBarcodeInput();
+      return;
+    }
+
+    // Cache miss: either a genuinely unknown barcode, or a brand-new
+    // product added moments ago that hasn't synced down yet. Only worth a
+    // network round trip if we're actually online — offline, there's
+    // nothing more to check, so fail fast instead of hanging.
+    if (!catalogSync.isOnline) {
+      toast(`No product for barcode: ${code} (offline — will retry once back online)`, "error");
+      resetBarcodeInput();
       return;
     }
 
@@ -2121,6 +2205,25 @@ function POSPageInner() {
                   {scannerFocused
                     ? "Scanner ready — pull the trigger on any barcode"
                     : "Click the barcode box, or a USB scanner gun will type into it automatically"}
+                </div>
+
+                {/* Offline catalog cache status — the whole point of this
+                    is to make the cashier trust the scan even when the
+                    shop's connection is bad, so surface it plainly rather
+                    than hide it. */}
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-gray-400">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      catalogSync.isOnline ? "bg-blue-400" : "bg-amber-500"
+                    }`}
+                  />
+                  {!catalogSync.isOnline
+                    ? `Offline — using cached catalog (${catalogSync.productCount} products)`
+                    : catalogSync.isSyncing
+                      ? "Syncing catalog…"
+                      : catalogSync.lastSyncedAt
+                        ? `Catalog synced ${formatRelativeSync(catalogSync.lastSyncedAt)} · ${catalogSync.productCount} products`
+                        : `${catalogSync.productCount} products cached`}
                 </div>
 
                 {/* Search results dropdown */}
