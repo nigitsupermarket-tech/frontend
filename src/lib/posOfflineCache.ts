@@ -355,6 +355,24 @@ export async function lookupByBarcode(code: string): Promise<LookupResult | null
   return { product, variation };
 }
 
+// Exact SKU match (case-insensitive) — the fallback for a label that
+// carries the SKU instead of a registered barcode. Returns null when
+// nothing matches OR when more than one product shares the SKU, so an
+// ambiguous scan never silently adds the wrong item.
+export async function lookupBySku(code: string): Promise<CachedProduct | null> {
+  await ensureMemoryLoaded();
+  const q = code.trim().toLowerCase();
+  if (!q) return null;
+  let found: CachedProduct | null = null;
+  for (const p of memProducts.values()) {
+    if (p.sku && p.sku.toLowerCase() === q) {
+      if (found) return null;
+      found = p;
+    }
+  }
+  return found;
+}
+
 // Mirrors the backend's resolveScaleBarcode field layout exactly:
 //   digits 0-6   scale "Code"  → Product.scaleWareCode
 //   digits 7-11  net weight in grams

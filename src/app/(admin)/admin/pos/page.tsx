@@ -42,6 +42,7 @@ import { useDraftSync } from "@/hooks/useDraftSync";
 import { useCatalogSync } from "@/hooks/useCatalogSync";
 import {
   lookupByBarcode,
+  lookupBySku,
   lookupByScaleBarcode,
   isScaleBarcode,
   searchLocal,
@@ -1288,14 +1289,40 @@ function POSPageInner() {
     }
   };
 
-  const handleBarcode = async (code: string) => {
-    if (!code.trim()) return;
+  const handleBarcode = async (rawCode: string) => {
+    // Scanner guns often append a newline/space or a stray character
+    // (and a pasted code can carry one too). The search box tolerates that
+    // because it does a substring match; this exact-match path did not, so
+    // the same product scanned in the search box but failed here.
+    const code = rawCode.replace(/[\r\n\t]/g, "").trim();
+    if (!code) {
+      resetBarcodeInput();
+      return;
+    }
 
-    // ── Scale-printed barcode: resolved entirely from the local cache —
+    // ── 1. Exact match on a registered product/variation barcode FIRST.
+    // Previously any 18-digit code was assumed to be a scale-printed label
+    // and sent straight down the scale path — so a product whose real
+    // barcode happens to be 18 digits failed with "No product has scale
+    // code … set at all". Scale labels embed the weight, so they never
+    // equal a registered barcode; checking this first can't misfire.
+    const exact = await lookupByBarcode(code);
+    if (exact) {
+      addOrPickVariation(fromCachedProduct(exact.product), exact.variation as any);
+      resetBarcodeInput();
+      return;
+    }
+
+    // ── 2. Scale-printed barcode: resolved entirely from the local cache —
     // the weight is decoded from the digits themselves and the product
     // match only needs scaleWareCode, both already on-device. Falls back
     // to the network only if the cache has no candidate at all (e.g. a
     // scale code assigned in the last few seconds, before the next sync).
+    // If an 18-digit code isn't a known scale label it may still be a
+    // regular product barcode that just isn't in the local cache yet, so
+    // a scale miss falls through to the SKU/network lookups below and only
+    // reports the scale-specific error if everything else misses too.
+    let scaleErrorMsg: string | null = null;
     if (isScaleBarcode(code)) {
       const cached = await lookupByScaleBarcode(code);
       if ("product" in cached) {
@@ -1303,27 +1330,25 @@ function POSPageInner() {
         resetBarcodeInput();
         return;
       }
+      scaleErrorMsg = scaleBarcodeErrorMessage(cached.error);
       if (catalogSync.isOnline) {
         try {
           const res = await apiGet<any>(`/pos/scale-barcode/${code}`);
           const { product, weightKg } = res.data;
           addWeighedToCart(product, weightKg);
-        } catch (err) {
-          toast(getApiError(err), "error");
-        } finally {
           resetBarcodeInput();
+          return;
+        } catch (err) {
+          scaleErrorMsg = getApiError(err);
         }
-        return;
       }
-      toast(scaleBarcodeErrorMessage(cached.error), "error");
-      resetBarcodeInput();
-      return;
     }
 
-    // ── Regular product/variation barcode — local cache first, instant.
-    const hit = await lookupByBarcode(code);
-    if (hit) {
-      addOrPickVariation(fromCachedProduct(hit.product), hit.variation as any);
+    // ── 3. Label carries the SKU instead of a registered barcode (the
+    // search box finds these because it matches SKU too).
+    const bySku = await lookupBySku(code);
+    if (bySku) {
+      addOrPickVariation(fromCachedProduct(bySku), undefined);
       resetBarcodeInput();
       return;
     }
@@ -1334,7 +1359,8 @@ function POSPageInner() {
     // nothing more to check, so fail fast instead of hanging.
     if (!catalogSync.isOnline) {
       toast(
-        `No product for barcode: ${code} (offline — will retry once back online)`,
+        scaleErrorMsg ??
+          `No product for barcode/SKU: ${code} (offline — will retry once back online)`,
         "error",
       );
       resetBarcodeInput();
@@ -1358,7 +1384,12 @@ function POSPageInner() {
                 (v: ProductVariation) => v.barcode === code,
               );
         addOrPickVariation(product, matchedVariation);
-      } else toast(`No product for barcode: ${code}`, "error");
+      } else
+        toast(
+          scaleErrorMsg ??
+            `No product matches "${code}" by barcode or SKU. Add this barcode to the product, or search it by name.`,
+          "error",
+        );
     } catch {
       toast("Barcode lookup failed", "error");
     } finally {
