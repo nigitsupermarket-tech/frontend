@@ -1697,7 +1697,16 @@ function POSPageInner() {
     );
   };
 
-  const clearCart = () => {
+  // Abandoning a cart that was resumed from a hold would otherwise leave
+  // its OPEN draft in the database forever. Best-effort delete; skipped
+  // when the cart was just completed (the server already removed the draft).
+  const discardActiveDraft = (orderId: string | null) => {
+    if (!orderId) return;
+    apiDelete(`/pos/orders/${orderId}/suspended`).catch(() => {});
+  };
+
+  const clearCart = (opts?: { keepDraft?: boolean }) => {
+    if (!opts?.keepDraft) discardActiveDraft(activeOrderId);
     setCart([]);
     clearCartDraft();
     setAppliedDiscount(null);
@@ -1965,19 +1974,14 @@ function POSPageInner() {
         sessionId: session.id,
       };
 
-      // If this cart was resumed from a hold, void the draft hold order first
-      // (it never deducted stock, so void is safe and purely a status cleanup)
-      if (activeOrderId) {
-        try {
-          await apiPut<any>(`/pos/orders/${activeOrderId}/void`, {
-            reason: "Completed via resume — replaced by new order",
-          });
-        } catch {
-          // Non-fatal: proceed even if the void fails
-        }
-      }
-
-      const res = await apiPost<any>("/pos/orders", orderData);
+      // If this cart was resumed from a hold, the server deletes that draft
+      // as part of creating the sale. (This used to call the ADMIN-only
+      // /void endpoint first and swallow the 403, which left an OPEN ghost
+      // order behind for every non-admin cashier.)
+      const res = await apiPost<any>("/pos/orders", {
+        ...orderData,
+        ...(activeOrderId ? { resumedFromOrderId: activeOrderId } : {}),
+      });
       const order = res.data.order;
 
       setCompletedOrder({
@@ -2019,7 +2023,7 @@ function POSPageInner() {
 
       setShowReceipt(true);
       setShowPayment(false);
-      clearCart();
+      clearCart({ keepDraft: true }); // server already deleted the resumed draft
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -2478,7 +2482,7 @@ function POSPageInner() {
             </div>
             {cart.length > 0 && (
               <button
-                onClick={clearCart}
+                onClick={() => clearCart()}
                 className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" /> Clear

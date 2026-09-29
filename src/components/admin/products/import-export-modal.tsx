@@ -308,6 +308,22 @@ export function ImportExportModal({
     }
   };
 
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    try {
+      await downloadBlob(
+        `${API_URL}/export/products/excel`,
+        `products-${Date.now()}.xlsx`,
+        token,
+      );
+      toast("Products exported as Excel", "success");
+    } catch (error) {
+      toast(getApiError(error), "error");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleExportPDF = async () => {
     setIsExporting(true);
     try {
@@ -800,6 +816,26 @@ export function ImportExportModal({
                     </p>
                     <p className="text-xs text-gray-500">
                       Same columns as the import template — ready to re-import
+                    </p>
+                  </div>
+                  {isExporting ? (
+                    <Loader2 className="w-4 h-4 text-gray-400 ml-auto animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 text-gray-400 ml-auto" />
+                  )}
+                </button>
+                <button
+                  onClick={handleExportExcel}
+                  disabled={isExporting}
+                  className="flex items-center gap-3 p-4 border border-gray-200 rounded-xl hover:border-emerald-400 hover:bg-emerald-50 transition-all disabled:opacity-50 text-left"
+                >
+                  <FileSpreadsheet className="w-8 h-8 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-sm text-gray-900">
+                      Export as Excel
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Same columns as CSV, opens straight in Excel/Sheets
                     </p>
                   </div>
                   {isExporting ? (

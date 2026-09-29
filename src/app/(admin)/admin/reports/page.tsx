@@ -24,7 +24,9 @@ import { formatPrice, formatPriceCompact, formatDateTime } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 import { PageLoader } from "@/components/shared/loading-spinner";
 
-const PRIVILEGED = ["ADMIN", "MANAGER", "ACCOUNTANT"];
+// Must match PRIVILEGED_ROLES in report.controller.ts. SALES is the only
+// staff-side role limited to its own activity.
+const PRIVILEGED = ["ADMIN", "MANAGER", "STAFF", "ACCOUNTANT"];
 
 // Only the summary-card report types live here now. Stock movement, stock
 // approvals, and activity are always-on tabs below (see DETAIL_TABS) so
@@ -141,6 +143,9 @@ export default function ReportsPage() {
     userId: "",
   });
 
+  // Bumped by the Generate button to force a refetch with the same filters.
+  const [refreshKey, setRefreshKey] = useState(0);
+
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<any>(null);
   const [error, setError] = useState("");
@@ -232,7 +237,9 @@ export default function ReportsPage() {
     if (!isPrivileged) return;
     // Populate the user picker so ADMIN/MANAGER/ACCOUNTANT can pull a
     // report for a specific staff member instead of the whole org.
-    apiGet<any>("/users", { limit: "100" })
+    // Dedicated endpoint: /users is hierarchy-scoped, closed to ACCOUNTANT,
+    // and returns customers too, so it can't be used as a staff picker.
+    apiGet<any>("/reports/users")
       .then((r) => setUsers(r.data?.users || []))
       .catch(() => {});
   }, [isPrivileged]);
@@ -334,7 +341,7 @@ export default function ReportsPage() {
   useEffect(() => {
     runReport(applied, type);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applied, type]);
+  }, [applied, type, refreshKey]);
 
   // Detail tab refetches on tab switch, page change, applied filters, or
   // (for the stock tab) the sales-channel source filter, or the product
@@ -349,22 +356,66 @@ export default function ReportsPage() {
       appliedProduct,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, pageByTab[activeTab], applied, stockSource, appliedProduct]);
+  }, [
+    activeTab,
+    pageByTab[activeTab],
+    applied,
+    stockSource,
+    appliedProduct,
+    refreshKey,
+  ]);
 
+  // Filters apply as soon as they're changed — no separate "Generate" click
+  // needed (previously the dropdowns only edited draft state, so picking a
+  // user or date looked like it did nothing until Generate was pressed).
+  // An incomplete selection (custom range missing a date, "Specific user"
+  // with nobody picked yet) is NOT applied, so it can never silently fall
+  // back to a whole-business report.
+  useEffect(() => {
+    if (interval === "custom") {
+      if (!from || !to) return;
+      if (from > to) {
+        setError("The start date must be on or before the end date");
+        return;
+      }
+    }
+    if (scope === "user" && !userId) return;
+
+    setError("");
+    setPageByTab({
+      stock: 1,
+      "stock-approvals": 1,
+      activity: 1,
+      "product-sales": 1,
+    });
+    setApplied((prev) => {
+      const next: AppliedFilters = {
+        interval,
+        from: interval === "custom" ? from : "",
+        to: interval === "custom" ? to : "",
+        userId: scope === "user" ? userId : "",
+      };
+      return prev.interval === next.interval &&
+        prev.from === next.from &&
+        prev.to === next.to &&
+        prev.userId === next.userId
+        ? prev
+        : next;
+    });
+  }, [interval, from, to, scope, userId]);
+
+  // Generate = refresh with the current filters.
   const handleGenerate = () => {
     if (interval === "custom" && (!from || !to)) {
       setError("Pick both a start and end date for a custom range");
       return;
     }
-    // Changing the filters restarts pagination on every tab so nobody is
-    // looking at page 4 of a completely different date range.
-    setPageByTab({ stock: 1, "stock-approvals": 1, activity: 1, "product-sales": 1 });
-    setApplied({
-      interval,
-      from,
-      to,
-      userId: scope === "user" ? userId : "",
-    });
+    if (scope === "user" && !userId) {
+      setError("Select a user, or switch the scope to Whole business");
+      return;
+    }
+    setError("");
+    setRefreshKey((k) => k + 1);
   };
 
   const setTabPage = (tab: string, page: number) => {
@@ -471,7 +522,7 @@ export default function ReportsPage() {
       y += 8;
 
       // ── Summary cards ────────────────────────────────────────────────
-      if (sales) {
+      if (sales && sales.attributable !== false) {
         autoTable(doc, {
           startY: y,
           margin: { left: 14, right: 14 },
@@ -967,7 +1018,17 @@ function SummaryResults({ report }: { report: any }) {
         generated {formatDateTime(meta.generatedAt)}
       </div>
 
-      {sections.sales && (
+      {sections.sales && sections.sales.attributable === false && (
+        <Section title="Online Sales">
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl p-3">
+            Online orders are placed by customers, not processed by staff, so
+            they can&apos;t be attributed to a specific user. Switch the scope
+            to Whole business to see online sales.
+          </div>
+        </Section>
+      )}
+
+      {sections.sales && sections.sales.attributable !== false && (
         <Section title="Online Sales">
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <SummaryCard label="Orders" value={sections.sales.orderCount} />

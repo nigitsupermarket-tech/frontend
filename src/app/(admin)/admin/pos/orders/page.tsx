@@ -55,10 +55,18 @@ export default function POSOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DayStats | null>(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState(
-    () => new Date().toISOString().split("T")[0],
-  );
+  // Defaults to completed transactions so held (SUSPENDED) carts don't
+  // clutter the list or inflate the order count. Pick another status to
+  // see them.
+  const [statusFilter, setStatusFilter] = useState("COMPLETED");
+  // Local calendar date — toISOString() is UTC, which is still "yesterday"
+  // for the first hour of the day in Nigeria (WAT, UTC+1).
+  const [dateFilter, setDateFilter] = useState(() => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${mm}-${dd}`;
+  });
   const [page, setPage] = useState(1);
   // Guards against spam-clicking Print: tracks which order is currently
   // printing so its button can be disabled until the job finishes.
@@ -93,7 +101,7 @@ export default function POSOrdersPage() {
   const handleDeleteSuspended = async (order: POSOrder) => {
     if (
       !window.confirm(
-        `Delete suspended order "${order.posOrderNumber}"? This cannot be undone.`,
+        `Delete ${order.status === "OPEN" ? "unfinished" : "suspended"} order "${order.posOrderNumber}"? It was never charged and no stock was deducted. This cannot be undone.`,
       )
     ) {
       return;
@@ -168,7 +176,13 @@ export default function POSOrdersPage() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats — always completed transactions only (held, open and voided
+          orders never count toward sales), regardless of the list filter. */}
+      {stats && (
+        <p className="text-xs text-gray-400 -mb-2">
+          Stats below count completed transactions only
+        </p>
+      )}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
@@ -217,24 +231,35 @@ export default function POSOrdersPage() {
             type="text"
             placeholder="Search order #, customer, receipt..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full pl-9 pr-4 py-2 border border-gray-300 text-sm focus:outline-none focus:border-green-500 rounded"
           />
         </div>
         <input
           type="date"
           value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
+          onChange={(e) => {
+            setDateFilter(e.target.value);
+            setPage(1);
+          }}
           className="border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded"
         />
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
           className="border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded bg-white"
         >
-          <option value="">All Status</option>
           <option value="COMPLETED">Completed</option>
           <option value="VOIDED">Voided</option>
+          <option value="SUSPENDED">Suspended (held)</option>
+          <option value="OPEN">Open (unfinished)</option>
+          <option value="">All statuses</option>
         </select>
       </div>
 
@@ -359,13 +384,13 @@ export default function POSOrdersPage() {
                           >
                             <Download className="w-4 h-4" />
                           </button>
-                          {order.status === "SUSPENDED" && (
+                          {(order.status === "SUSPENDED" || order.status === "OPEN") && (
                             <button
                               type="button"
                               onClick={() => handleDeleteSuspended(order)}
                               disabled={deletingOrderId === order.id}
                               className="p-1.5 text-red-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
-                              title="Delete this suspended order"
+                              title="Delete this unfinished/held order"
                             >
                               {deletingOrderId === order.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -384,7 +409,7 @@ export default function POSOrdersPage() {
             {pagination.totalPages > 1 && (
               <div className="flex justify-between items-center px-4 py-3 border-t border-gray-200 bg-gray-50">
                 <span className="text-xs text-gray-500">
-                  {pagination.total} total orders
+                  {pagination.total} {statusFilter ? statusFilter.toLowerCase() : "total"} orders
                 </span>
                 <div className="flex gap-2">
                   {Array.from(
