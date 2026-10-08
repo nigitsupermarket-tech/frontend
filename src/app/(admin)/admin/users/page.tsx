@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Edit2, Trash2, Search, UserCog } from "lucide-react";
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
+  UserCog,
+  Archive,
+  Download,
+} from "lucide-react";
 import { User } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -106,7 +114,7 @@ export default function AdminUsersPage() {
     fetchUsers();
   }, [fetchUsers]);
 
-  // ── Customer lookup (search by name/email, then upgrade their role) ─────
+  // ── User lookup (search any role by name/email, then change their role) ─
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerResults, setCustomerResults] = useState<User[]>([]);
   const [searchingCustomers, setSearchingCustomers] = useState(false);
@@ -118,7 +126,8 @@ export default function AdminUsersPage() {
     setSearchedOnce(true);
     try {
       const res = await apiGet<any>("/users", {
-        role: "CUSTOMER",
+        // No role filter: search across every role. The backend still hides
+        // roles more senior than the signed-in user.
         search: customerSearch.trim(),
         limit: "20",
       });
@@ -127,6 +136,46 @@ export default function AdminUsersPage() {
       toast(getApiError(err), "error");
     } finally {
       setSearchingCustomers(false);
+    }
+  };
+
+  // ── Archive of deleted users (ADMIN only) ───────────────────────────────
+  const [showArchive, setShowArchive] = useState(false);
+  const [archive, setArchive] = useState<any[]>([]);
+  const [loadingArchive, setLoadingArchive] = useState(false);
+
+  const fetchArchive = async () => {
+    setLoadingArchive(true);
+    try {
+      const res = await apiGet<any>("/users/archived", { limit: "50" });
+      setArchive(res.data.archivedUsers || []);
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setLoadingArchive(false);
+    }
+  };
+
+  const toggleArchive = () => {
+    const next = !showArchive;
+    setShowArchive(next);
+    if (next) fetchArchive();
+  };
+
+  const downloadSnapshot = async (id: string, email: string) => {
+    try {
+      const res = await apiGet<any>(`/users/archived/${id}`);
+      const blob = new Blob([JSON.stringify(res.data.archivedUser, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `archived-user-${email}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast(getApiError(err), "error");
     }
   };
 
@@ -178,14 +227,23 @@ export default function AdminUsersPage() {
         setUsers((prev) =>
           prev
             .map((u) =>
-              u.id === editItem.id ? { ...u, ...form, role: form.role as User["role"] } : u,
+              u.id === editItem.id
+                ? { ...u, ...form, role: form.role as User["role"] }
+                : u,
             )
             // If they were demoted to CUSTOMER (or promoted out of
             // visibility), drop them from the staff-tier table.
-            .filter((u) => visibleRoles.includes(u.role) && u.role !== "CUSTOMER"),
+            .filter(
+              (u) => visibleRoles.includes(u.role) && u.role !== "CUSTOMER",
+            ),
         );
+        // Keep the user in the search results, reflecting their new role.
         setCustomerResults((prev) =>
-          prev.filter((u) => u.id !== editItem.id),
+          prev.map((u) =>
+            u.id === editItem.id
+              ? { ...u, role: form.role as User["role"] }
+              : u,
+          ),
         );
       } else {
         await apiPost("/users", {
@@ -207,11 +265,18 @@ export default function AdminUsersPage() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+    if (
+      !confirm(
+        `Remove "${name}"?\n\nA snapshot of their account (profile, addresses, reviews, order history) will be saved to the Archived users list first. Their past orders are kept.`,
+      )
+    )
+      return;
     try {
       await apiDelete(`/users/${id}`);
-      toast("User removed", "success");
+      toast("User archived and removed", "success");
+      setCustomerResults((prev) => prev.filter((u) => u.id !== id));
       fetchUsers();
+      if (isAdmin && showArchive) fetchArchive();
     } catch (err) {
       toast(getApiError(err), "error");
     }
@@ -355,12 +420,12 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* ── Customer lookup — find any customer and upgrade their role ──── */}
+      {/* ── User lookup — find any user (all roles) and change their role ── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <div className="flex items-center gap-2 mb-3">
           <UserCog className="w-4 h-4 text-gray-400" />
           <h2 className="font-semibold text-gray-900 text-sm">
-            Find a customer to upgrade
+            Find a user (any role)
           </h2>
         </div>
         <div className="flex gap-2">
@@ -387,7 +452,7 @@ export default function AdminUsersPage() {
           <div className="mt-4 divide-y divide-gray-50">
             {customerResults.length === 0 ? (
               <p className="text-xs text-gray-400 py-3">
-                No matching customers found.
+                No matching users found.
               </p>
             ) : (
               customerResults.map((u) => (
@@ -405,12 +470,25 @@ export default function AdminUsersPage() {
                       </p>
                       <p className="text-xs text-gray-400">{u.email}</p>
                     </div>
+                    <span
+                      className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        roleColors[u.role] || "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {u.role}
+                    </span>
                   </div>
                   <button
                     onClick={() => openEdit(u)}
-                    className="px-3 py-1.5 text-xs font-medium text-brand-700 bg-brand-50 rounded-lg hover:bg-brand-100 transition-colors"
+                    disabled={!canEditTarget(u)}
+                    title={
+                      canEditTarget(u)
+                        ? undefined
+                        : "You can't modify this account"
+                    }
+                    className="px-3 py-1.5 text-xs font-medium text-brand-700 bg-brand-50 rounded-lg hover:bg-brand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
-                    Upgrade role
+                    {u.role === "CUSTOMER" ? "Upgrade role" : "Edit role"}
                   </button>
                 </div>
               ))
@@ -418,6 +496,68 @@ export default function AdminUsersPage() {
           </div>
         )}
       </div>
+
+      {/* ── Archived (deleted) users — ADMIN only ─────────────────────── */}
+      {isAdmin && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <button
+            onClick={toggleArchive}
+            className="flex items-center gap-2 w-full text-left"
+          >
+            <Archive className="w-4 h-4 text-gray-400" />
+            <h2 className="font-semibold text-gray-900 text-sm">
+              Archived users
+            </h2>
+            <span className="text-xs text-gray-400 ml-auto">
+              {showArchive ? "Hide" : "Show"}
+            </span>
+          </button>
+          {showArchive && (
+            <div className="mt-3 divide-y divide-gray-50">
+              {loadingArchive ? (
+                <p className="text-xs text-gray-400 py-3">Loading…</p>
+              ) : archive.length === 0 ? (
+                <p className="text-xs text-gray-400 py-3">
+                  No deleted users yet.
+                </p>
+              ) : (
+                archive.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center justify-between py-2.5 gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 text-sm truncate">
+                        {a.name}{" "}
+                        <span
+                          className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            roleColors[a.role] || "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {a.role}
+                        </span>
+                      </p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {a.email} · deleted {formatDate(a.deletedAt)}
+                        {a.deletedByName ? ` by ${a.deletedByName}` : ""} ·{" "}
+                        {(a.counts?.orders ?? 0) +
+                          (a.counts?.posOrdersProcessed ?? 0)}{" "}
+                        orders kept
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => downloadSnapshot(a.id, a.email)}
+                      className="shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Snapshot
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Staff-tier accounts (peers and below, per role hierarchy) ──── */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
