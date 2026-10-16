@@ -5,7 +5,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Search,
   Barcode,
-  Plus,
   Minus,
   Trash2,
   Printer,
@@ -389,16 +388,6 @@ function CartItemRow({
     : undefined;
   const isVariationLine = !!item.variationId;
 
-  const variationMax = variation
-    ? variation.stockQuantity !== null && variation.stockQuantity !== undefined
-      ? variation.stockQuantity
-      : item.product.trackInventory
-        ? Math.floor(
-            (item.product.stockQuantity ?? Infinity) / variation.quantity,
-          )
-        : Infinity
-    : Infinity;
-
   const isScalable = !!item.product.isScalable;
   const unit = item.product.scaleUnit || "unit";
   const step = item.product.scaleStep ?? 0.1;
@@ -406,13 +395,6 @@ function CartItemRow({
   // quantity can only change by tapping one of the preset weight chips.
   const presetOnly = !isVariationLine && isScalable && step === 0;
   const minQty = item.product.minOrderQty || (presetOnly ? 0 : step);
-  const maxStock = item.product.trackInventory
-    ? (item.product.stockQuantity ?? Infinity)
-    : Infinity;
-  const maxQty = item.product.maxOrderQty
-    ? Math.min(item.product.maxOrderQty, maxStock)
-    : maxStock;
-
   const roundStep = (v: number) =>
     parseFloat((Math.round(v / step) * step).toFixed(10));
 
@@ -438,37 +420,9 @@ function CartItemRow({
     }
   };
 
-  const handleIncrement = () => {
-    if (isVariationLine) {
-      if (item.quantity + 1 > variationMax) return;
-      onQtyChange(item.quantity + 1);
-      return;
-    }
-    if (presetOnly) return;
-    if (isScalable) {
-      const next = roundStep(item.quantity + step);
-      if (next > maxQty) return;
-      onQtyChange(next);
-    } else {
-      onQtyChange(item.quantity + 1);
-    }
-  };
-
-  const atMin = isVariationLine
-    ? item.quantity <= 1
-    : presetOnly
-      ? true
-      : isScalable
-        ? item.quantity <= minQty
-        : item.quantity <= 1;
-  const atMax = isVariationLine
-    ? item.quantity >= variationMax
-    : presetOnly
-      ? true
-      : isScalable
-        ? item.quantity >= maxQty
-        : item.product.trackInventory &&
-          item.quantity >= (item.product.stockQuantity ?? Infinity);
+  // NOTE: there is intentionally no increment handler. Quantity can only go
+  // UP when the item is scanned again (barcode gun / camera → addToCart with
+  // fromScan). The cashier can only step DOWN one at a time or delete the line.
 
   const qtyDisplay = isVariationLine
     ? `×${item.quantity}`
@@ -521,8 +475,11 @@ function CartItemRow({
                 {(item.product.scalePresets || []).slice(0, 4).map((p) => (
                   <button
                     key={p}
+                    // Presets may only lower the quantity — raising it is
+                    // scan-only.
+                    disabled={p > item.quantity}
                     onClick={() => onQtyChange(p)}
-                    className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                    className={`text-[8px] font-bold px-1.5 py-0.5 rounded border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                       item.quantity === p
                         ? "bg-green-600 text-white border-green-600"
                         : "border-gray-300 text-gray-600 hover:border-green-500"
@@ -546,28 +503,16 @@ function CartItemRow({
               <button
                 onClick={handleDecrement}
                 className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200"
+                title="Remove one"
               >
                 <Minus className="w-2.5 h-2.5" />
               </button>
               <span
                 className={`text-center text-xs font-bold ${isScalable || isVariationLine ? "w-14 px-1" : "w-7"}`}
+                title="Scan the item again to add more"
               >
                 {qtyDisplay}
               </span>
-              <button
-                onClick={handleIncrement}
-                disabled={!!atMax}
-                className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-                title={
-                  atMax
-                    ? isVariationLine
-                      ? `Max ${variationMax} pack(s) reached`
-                      : `Max ${isScalable ? `${maxQty} ${unit}` : `stock (${item.product.stockQuantity})`} reached`
-                    : undefined
-                }
-              >
-                <Plus className="w-2.5 h-2.5" />
-              </button>
             </div>
           )}
         </div>
@@ -1081,6 +1026,8 @@ function POSPageInner() {
 
   const searchRef = useRef<HTMLInputElement>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
+  // Product id of a scan that opened a picker; lets that picker's tap increment.
+  const scanPickerProductRef = useRef<string | null>(null);
 
   // ── Auto-scroll the cart to the newly-added item ────────────────────────
   // With a long cart, a cashier scanning item after item shouldn't have to
@@ -1308,7 +1255,11 @@ function POSPageInner() {
     // equal a registered barcode; checking this first can't misfire.
     const exact = await lookupByBarcode(code);
     if (exact) {
-      addOrPickVariation(fromCachedProduct(exact.product), exact.variation as any);
+      addOrPickVariation(
+        fromCachedProduct(exact.product),
+        exact.variation as any,
+        true,
+      );
       resetBarcodeInput();
       return;
     }
@@ -1348,7 +1299,7 @@ function POSPageInner() {
     // search box finds these because it matches SKU too).
     const bySku = await lookupBySku(code);
     if (bySku) {
-      addOrPickVariation(fromCachedProduct(bySku), undefined);
+      addOrPickVariation(fromCachedProduct(bySku), undefined, true);
       resetBarcodeInput();
       return;
     }
@@ -1383,7 +1334,7 @@ function POSPageInner() {
             : (product.variations || []).find(
                 (v: ProductVariation) => v.barcode === code,
               );
-        addOrPickVariation(product, matchedVariation);
+        addOrPickVariation(product, matchedVariation, true);
       } else
         toast(
           scaleErrorMsg ??
@@ -1452,11 +1403,34 @@ function POSPageInner() {
     }
   };
 
+  // `fromScan` = true only when the item came from the barcode scanner
+  // (USB gun or camera). Only a scan may INCREASE an item already in the
+  // cart; grid taps, search results and preset pickers can add a NEW line
+  // but never bump an existing one.
   const addToCart = (
     product: Product,
     presetQty?: number,
     variation?: ProductVariation,
+    fromScan = false,
   ) => {
+    const scanAllowed = fromScan || scanPickerProductRef.current === product.id;
+    scanPickerProductRef.current = null;
+    if (!scanAllowed) {
+      const alreadyInCart = cart.some(
+        (i) =>
+          i.product.id === product.id &&
+          (variation
+            ? i.variationId === variation.id
+            : !i.variationId),
+      );
+      if (alreadyInCart) {
+        toast(
+          `${product.name} is already in the cart — scan it to add more`,
+          "error",
+        );
+        return;
+      }
+    }
     // ── Structured preset/variation (e.g. "500g Pack") ────────────────────
     if (variation) {
       const dedicated =
@@ -1655,9 +1629,13 @@ function POSPageInner() {
   const addOrPickVariation = (
     product: Product,
     matchedVariation?: ProductVariation,
+    fromScan = false,
   ) => {
+    // A scan that has to open a picker/weigh modal first remembers which
+    // product it was for, so the follow-up tap in the picker may increment.
+    scanPickerProductRef.current = null;
     if (matchedVariation) {
-      addToCart(product, undefined, matchedVariation);
+      addToCart(product, undefined, matchedVariation, fromScan);
       return;
     }
     const activeVariations = (product.variations || []).filter(
@@ -1678,6 +1656,7 @@ function POSPageInner() {
       !!product.isScalable &&
       (product.scalePresets?.length ?? 0) > 0;
     if (hasVariations || presetOnly || hasLegacyPresets) {
+      if (fromScan) scanPickerProductRef.current = product.id;
       setSearchPickerProduct(product);
       setShowSearch(false);
       return;
@@ -1687,9 +1666,12 @@ function POSPageInner() {
       setShowSearch(false);
       return;
     }
-    addToCart(product);
+    addToCart(product, undefined, undefined, fromScan);
   };
 
+  // Decrease-only: the cashier can never raise a quantity by hand — that's
+  // enforced here as well as in the UI. Increases come only from addToCart
+  // with fromScan.
   const updateQty = (productId: string, qty: number, variationId?: string) => {
     if (qty <= 0) {
       setCart((p) =>
@@ -1706,7 +1688,8 @@ function POSPageInner() {
     setCart((p) =>
       p.map((i) =>
         i.product.id === productId &&
-        (i.variationId ?? undefined) === variationId
+        (i.variationId ?? undefined) === variationId &&
+        qty < i.quantity
           ? { ...i, quantity: qty }
           : i,
       ),
