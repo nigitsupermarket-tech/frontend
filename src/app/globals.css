@@ -1,5 +1,8 @@
 /* ── Google Fonts: Montserrat ─────────────────────────────────────── */
-/* Font is loaded via next/font in layout.tsx — no @import needed here */
+/* Font is loaded via a <link> in layout.tsx — no @import needed here */
+:root {
+  --font-sans: "Montserrat";
+}
 
 @tailwind base;
 @tailwind components;

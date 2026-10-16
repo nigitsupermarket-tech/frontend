@@ -1,18 +1,10 @@
 // app/layout.tsx
 
 import type { Metadata } from "next";
-import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/shared/toaster";
 import { Providers } from "@/components/shared/providers";
 import { SiteInjector } from "@/components/shared/site-injector";
-
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -50,8 +42,20 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="icon" href="/favicon.ico" />
+        {/* Loaded by the browser at runtime (not next/font/google) so a
+            Google Fonts hiccup can never break the production build. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap"
+        />
       </head>
-      <body className={`${montserrat.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         <Providers>
           <SiteInjector />
           {children}
