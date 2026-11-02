@@ -34,7 +34,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
-  ],
+, "../backend/src/lib/cartIndexes.ts"  ],
   "exclude": [
     "node_modules"
   ]

@@ -25,6 +25,7 @@ import {
 import { useToast } from "@/store/uiStore";
 import { ImportExportModal } from "@/components/admin/products/import-export-modal";
 import { useAuthStore } from "@/store/authStore";
+import { stockNeedsApproval } from "@/lib/stockPermissions";
 import Image from "next/image";
 
 const stockColors: Record<string, string> = {
@@ -265,7 +266,7 @@ export default function AdminProductsPage() {
   };
 
   const submitQuickStock = async () => {
-    if (!quickStock) return;
+    if (!quickStock || !stockNeedsApproval(user?.role)) return;
     setSavingStock(true);
     try {
       const res = await apiPost<any>("/stock-approvals", {
@@ -573,7 +574,7 @@ export default function AdminProductsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         {/* Non-admin: quick stock button */}
-                        {!isAdmin && (
+                        {stockNeedsApproval(user?.role) && (
                           <button
                             onClick={() =>
                               setQuickStock({

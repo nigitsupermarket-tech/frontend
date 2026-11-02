@@ -12,6 +12,7 @@ import { apiGet, apiPost, apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { useDraftSync } from "@/hooks/useDraftSync";
+import { canEditStock, stockNeedsApproval, pluralUnit } from "@/lib/stockPermissions";
 import { useRouter } from "next/navigation";
 import { generateSlug, generateSKU } from "@/lib/utils";
 import { Category, Brand } from "@/types";
@@ -74,6 +75,7 @@ function Input({
   type = "text",
   required,
   hint,
+  disabled,
 }: {
   label: string;
   value: string | number;
@@ -82,6 +84,8 @@ function Input({
   type?: string;
   required?: boolean;
   hint?: string;
+  /** Renders the field inactive: greyed out, not focusable, not editable. */
+  disabled?: boolean;
 }) {
   return (
     <div>
@@ -93,7 +97,13 @@ function Input({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded"
+        disabled={disabled}
+        readOnly={disabled}
+        aria-readonly={disabled || undefined}
+        title={disabled ? "You do not have permission to change this" : undefined}
+        className={`w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-green-500 rounded ${
+          disabled ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""
+        }`}
       />
       {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
     </div>
@@ -264,6 +274,10 @@ export default function ProductForm({ productId, onSave }: Props) {
   const router = useRouter();
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
+  // ADMIN edits stock directly; MANAGER/STAFF via admin approval;
+  // SALES/ACCOUNTANT (and anyone else) can't touch stock at all.
+  const canChangeStock = canEditStock(user?.role);
+  const stockViaApproval = stockNeedsApproval(user?.role);
 
   // SALES role cannot create new products — redirect to product list
   useEffect(() => {
@@ -288,6 +302,12 @@ export default function ProductForm({ productId, onSave }: Props) {
   // preset stock so they can be routed through admin approval, the same way
   // a product-level stockQuantity edit already is (see handleSubmit below).
   const originalVariationStockRef = useRef<Record<string, number | null>>({});
+  // The product's stockQuantity exactly as the server returned it when this
+  // page loaded. Save logic compares against THIS (never against the form
+  // value or a re-fetch) so only a stock edit the user actually made is ever
+  // written / requested — a stale form or restored draft can't masquerade as
+  // one and overwrite live stock.
+  const loadedStockRef = useRef<number | null>(null);
   const [activeTab, setActiveTab] = useState("basic");
 
   // ── "Continue where you left off" ────────────────────────────────────
@@ -303,8 +323,36 @@ export default function ProductForm({ productId, onSave }: Props) {
     enabled: !isLoading && !saving,
     restoreWhen: !isLoading,
     onRestore: (payload) => {
-      if (payload?.form) setForm(payload.form);
-      if (payload?.variations) setVariations(payload.variations);
+      // Stock is LIVE data — it moves with every sale, return and approved
+      // adjustment — so a draft must never bring a stale number back. For an
+      // existing product, restore everything the user was typing EXCEPT the
+      // stock figures, which keep the values just loaded from the server.
+      // (This was the cause of the details page showing e.g. 860 g while the
+      // product list correctly showed 260 g.) A brand-new product has no
+      // server value, so its draft is restored as-is.
+      if (payload?.form) {
+        setForm((prev) =>
+          productId
+            ? { ...payload.form, stockQuantity: prev.stockQuantity }
+            : payload.form,
+        );
+      }
+      if (payload?.variations) {
+        setVariations((prev) =>
+          productId
+            ? payload.variations.map((dv: VariationDraft) => {
+                const live = dv.id ? prev.find((p) => p.id === dv.id) : undefined;
+                return live
+                  ? {
+                      ...dv,
+                      dedicatedStock: live.dedicatedStock,
+                      stockQuantity: live.stockQuantity,
+                    }
+                  : dv;
+              })
+            : payload.variations,
+        );
+      }
     },
   });
 
@@ -327,6 +375,7 @@ export default function ProductForm({ productId, onSave }: Props) {
           });
           const p = res.data.product;
           setIsFrozenForDeletion(!!p.pendingDeleteRequest);
+          loadedStockRef.current = Number(p.stockQuantity ?? 0);
 
           const media: MediaItem[] = (p.images || []).map((url: string) => ({
             url,
@@ -824,11 +873,13 @@ export default function ProductForm({ productId, onSave }: Props) {
       // edits (name, price, a variation's label/price/etc.) still save
       // immediately; only the stock number itself is gated.
       if (!isAdmin && productId) {
-        const originalRes = await apiGet<any>(`/products/${productId}`, {
-          includeFrozen: "true",
-        });
-        const originalProduct = originalRes.data?.product;
-        const originalQty: number = originalProduct?.stockQuantity ?? 0;
+        // Compare against the stock this page LOADED with — not a fresh
+        // fetch. A fresh fetch makes any difference between the form and the
+        // live number (a stale tab, sales since opening) look like a stock
+        // edit and files a bogus approval request the user never intended.
+        // SALES/ACCOUNTANT can't change stock at all, so for them nothing is
+        // ever requested regardless of what the form holds.
+        const originalQty: number = loadedStockRef.current ?? Number(form.stockQuantity);
         const newQty = Number(form.stockQuantity);
 
         const activeVariations = variations.filter((v) => v.label.trim());
@@ -839,10 +890,11 @@ export default function ProductForm({ productId, onSave }: Props) {
         // whatever initial stock is entered — there's no prior approved
         // value to protect, same as a brand-new product's initial stock.
         const pendingApprovals: { variationId?: string; requestedQty: number; label: string }[] = [];
-        if (newQty !== originalQty) {
+        if (canChangeStock && newQty !== originalQty) {
           pendingApprovals.push({ requestedQty: newQty, label: "the product" });
         }
         for (const v of activeVariations) {
+          if (!canChangeStock) break;
           if (!v.id) continue;
           const originalStock = originalVariationStockRef.current[v.id] ?? null;
           const newStock =
@@ -928,7 +980,16 @@ export default function ProductForm({ productId, onSave }: Props) {
       // ── ADMIN (or brand-new product) — every field, including stock ────────
       const payload = {
         ...buildCommonFields(),
-        stockQuantity: Number(form.stockQuantity),
+        // A new product always carries its initial stock. When editing, the
+        // stock number is only sent if the admin actually changed it from
+        // what the page loaded — otherwise a stale form would overwrite
+        // sales/adjustments made since (and the product list would then
+        // disagree with the details page).
+        ...(!productId ||
+        (loadedStockRef.current !== null &&
+          Number(form.stockQuantity) !== loadedStockRef.current)
+          ? { stockQuantity: Number(form.stockQuantity) }
+          : {}),
         // Structured, individually-priced presets (e.g. "500g Pack")
         variations: form.isScalable
           ? variations
@@ -954,10 +1015,15 @@ export default function ProductForm({ productId, onSave }: Props) {
 
       if (productId) {
         await apiPut(`/products/${productId}`, payload);
+        loadedStockRef.current = Number(form.stockQuantity);
         toast.success("Product updated successfully!");
       } else {
         await apiPost("/products", payload);
-        toast.success("Product created successfully!");
+        toast.success(
+          !isAdmin && Number(form.stockQuantity) > 0
+            ? "Product created — initial stock is awaiting admin approval"
+            : "Product created successfully!",
+        );
         setForm(emptyForm);
       }
       clearDraft();
@@ -1536,6 +1602,10 @@ export default function ProductForm({ productId, onSave }: Props) {
                               <input
                                 type="checkbox"
                                 checked={v.dedicatedStock}
+                                // Switching a preset between shared and dedicated
+                                // stock re-counts inventory, so it's admin-only.
+                                disabled={!isAdmin}
+                                title={!isAdmin ? "Only an admin can change how a preset tracks stock" : undefined}
                                 onChange={(e) =>
                                   updateVariationRow(v._key, { dedicatedStock: e.target.checked })
                                 }
@@ -1548,11 +1618,24 @@ export default function ProductForm({ productId, onSave }: Props) {
                                 step="1"
                                 min="0"
                                 value={v.stockQuantity}
+                                // ADMIN: direct. MANAGER/STAFF: only an EXISTING preset,
+                                // and the change goes through approval. SALES/ACCOUNTANT: never.
+                                disabled={!canChangeStock || (!isAdmin && !v.id)}
+                                readOnly={!canChangeStock || (!isAdmin && !v.id)}
+                                title={
+                                  !canChangeStock
+                                    ? "You do not have permission to change stock"
+                                    : !isAdmin && !v.id
+                                      ? "Save the preset first, then request its stock"
+                                      : undefined
+                                }
                                 onChange={(e) =>
                                   updateVariationRow(v._key, { stockQuantity: e.target.value })
                                 }
                                 placeholder="Packs in stock"
-                                className="w-28 border border-gray-300 px-2 py-1 text-xs rounded focus:outline-none focus:border-green-500"
+                                className={`w-28 border border-gray-300 px-2 py-1 text-xs rounded focus:outline-none focus:border-green-500 ${
+                                  !canChangeStock || (!isAdmin && !v.id) ? "bg-gray-100 text-gray-500 cursor-not-allowed" : ""
+                                }`}
                               />
                             )}
                             <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
@@ -1839,10 +1922,10 @@ export default function ProductForm({ productId, onSave }: Props) {
           {form.isScalable && (
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800">
               <p className="font-semibold mb-1">
-                📦 Scalable product — stock in {form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s
+                📦 Scalable product — stock in {pluralUnit(form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit)}
               </p>
               <p>
-                Enter the total available <strong>{form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s</strong> in stock.
+                Enter the total available <strong>{pluralUnit(form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit)}</strong> in stock.
                 E.g. if you have 10 kg of meat, enter <strong>10</strong>.
                 POS and online store will block orders that exceed this amount.
               </p>
@@ -1854,7 +1937,15 @@ export default function ProductForm({ productId, onSave }: Props) {
             </div>
           )}
 
-          {!isAdmin && productId && (
+          {!canChangeStock && (
+            <div className="flex items-start gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700">
+              <span className="mt-0.5">🔒</span>
+              <span>
+                Your role ({user?.role}) can view stock but cannot change it. The stock field below is read-only.
+              </span>
+            </div>
+          )}
+          {stockViaApproval && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
               <span className="text-amber-500 mt-0.5">⚠️</span>
               <span>
@@ -1865,13 +1956,14 @@ export default function ProductForm({ productId, onSave }: Props) {
           <div className="grid grid-cols-2 gap-4">
             <Input
               label={form.isScalable
-                ? `Stock (${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s available)`
+                ? `Stock (${pluralUnit(form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit)} available)`
                 : "Stock Quantity"}
               type="number"
               value={form.stockQuantity}
+              disabled={!canChangeStock}
               onChange={(v) => setField("stockQuantity", Number(v))}
               hint={form.isScalable
-                ? `Total ${form.scaleUnit === "custom" ? form.scaleUnitCustom || "units" : form.scaleUnit}s on hand (e.g. 10)`
+                ? `Total ${pluralUnit(form.scaleUnit === "custom" ? form.scaleUnitCustom || "unit" : form.scaleUnit)} on hand (e.g. 10)`
                 : undefined}
             />
             <Input

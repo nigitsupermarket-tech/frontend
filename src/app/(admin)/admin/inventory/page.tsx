@@ -5,6 +5,7 @@ import { Package, Clock, Search } from "lucide-react";
 import { apiGet, apiPost, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import { canEditStock, stockNeedsApproval } from "@/lib/stockPermissions";
 import {
   TableRowSkeleton,
   EmptyState,
@@ -60,6 +61,8 @@ export default function AdminInventoryPage() {
 
   const { user } = useAuthStore();
   const isAdmin = user?.role === "ADMIN";
+  const canChangeStock = canEditStock(user?.role);
+  const needsApproval = stockNeedsApproval(user?.role);
   const toast = useToast();
 
   // Filtered items by search
@@ -107,7 +110,7 @@ export default function AdminInventoryPage() {
   }, [filter]);
 
   const handleSave = async () => {
-    if (!editing) return;
+    if (!editing || !canChangeStock) return;
     setSaving(true);
     try {
       const res = await apiPost<any>("/stock-approvals", {
@@ -139,10 +142,15 @@ export default function AdminInventoryPage() {
           <h1 className="text-xl font-bold text-gray-900">
             Inventory Management
           </h1>
-          {!isAdmin && (
+          {needsApproval && (
             <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
               <Clock className="w-3 h-3" />
               Stock changes require admin approval before taking effect
+            </p>
+          )}
+          {!canChangeStock && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              View only — your role cannot change stock.
             </p>
           )}
         </div>
@@ -340,6 +348,8 @@ export default function AdminInventoryPage() {
                               </p>
                             )}
                           </div>
+                        ) : !canChangeStock ? (
+                          <span className="text-xs text-gray-400">View only</span>
                         ) : (
                           <button
                             onClick={() =>
