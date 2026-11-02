@@ -1272,13 +1272,13 @@ export function ImportExportModal({
                       <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
                       <div className="space-y-1">
                         <p className="font-semibold">
-                          Stock changes require admin approval
+                          Your role cannot change stock
                         </p>
                         <p>
-                          <strong>stockQuantity</strong> values will be
-                          submitted as pending requests. Other fields update
-                          immediately. Your role cannot create new products via
-                          CSV — only existing SKUs can be updated.
+                          <strong>stockQuantity</strong> values in the file are
+                          ignored. Other fields update immediately. Your role
+                          cannot create new products via CSV — only existing
+                          SKUs can be updated.
                         </p>
                       </div>
                     </div>
