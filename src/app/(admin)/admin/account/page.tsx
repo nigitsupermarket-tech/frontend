@@ -6,6 +6,7 @@ import { apiPut, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { useAuth } from "@/hooks/useAuth";
+import { passwordProblem } from "@/lib/password";
 
 export default function AdminAccountPage() {
   const { user } = useAuthStore();
@@ -30,8 +31,9 @@ export default function AdminAccountPage() {
       toast("Please fill in all fields", "error");
       return;
     }
-    if (form.newPassword.length < 8) {
-      toast("New password must be at least 8 characters", "error");
+    const problem = passwordProblem(form.newPassword);
+    if (problem) {
+      toast(problem, "error");
       return;
     }
     if (form.newPassword !== form.confirmPassword) {

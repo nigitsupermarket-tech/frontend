@@ -9,7 +9,13 @@ import {
   UserCog,
   Archive,
   Download,
+  KeyRound,
+  X,
+  Copy,
+  Wand2,
 } from "lucide-react";
+import { PasswordInput } from "@/components/shared/password-input";
+import { passwordProblem, generatePassword, PASSWORD_HINT } from "@/lib/password";
 import { User } from "@/types";
 import { apiGet, apiPost, apiPut, apiDelete, getApiError } from "@/lib/api";
 import { useToast } from "@/store/uiStore";
@@ -63,6 +69,11 @@ export default function AdminUsersPage() {
   // promoting/demoting EXISTING customers (backend also enforces this).
   const canCreate = isAdmin || currentRole === "MANAGER";
   const canDelete = isAdmin;
+  // Mirrors the backend rule: ADMIN may reset anyone but themselves;
+  // MANAGER/STAFF only accounts strictly below their own rank.
+  const canResetTarget = (target: User) =>
+    target.id !== currentUser?.id &&
+    (isAdmin || ROLE_RANK[target.role] > currentRank);
   const canEditTarget = (target: User) =>
     isAdmin || ROLE_RANK[target.role] > currentRank;
 
@@ -82,6 +93,44 @@ export default function AdminUsersPage() {
   });
   const [saving, setSaving] = useState(false);
   const toast = useToast();
+
+  // ── Reset another user's password ──────────────────────────────────────
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
+  const [resetMode, setResetMode] = useState<"set" | "link">("set");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetting, setResetting] = useState(false);
+
+  const openReset = (u: User) => {
+    setResetTarget(u);
+    setResetMode("set");
+    setResetPassword("");
+  };
+
+  const submitReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetTarget) return;
+    if (resetMode === "set") {
+      const problem = passwordProblem(resetPassword);
+      if (problem) {
+        toast(problem, "error");
+        return;
+      }
+    }
+    setResetting(true);
+    try {
+      const res = await apiPost<any>(`/users/${resetTarget.id}/reset-password`, {
+        mode: resetMode,
+        password: resetMode === "set" ? resetPassword : undefined,
+      });
+      toast(res.message || "Password reset", "success");
+      setResetTarget(null);
+      setResetPassword("");
+    } catch (err) {
+      toast(getApiError(err), "error");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // ── Staff-tier table (everyone visible except plain customers) ──────────
   const fetchUsers = useCallback(async () => {
@@ -209,6 +258,13 @@ export default function AdminUsersPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editItem) {
+      const problem = passwordProblem(form.password);
+      if (problem) {
+        toast(problem, "error");
+        return;
+      }
+    }
     setSaving(true);
     try {
       if (editItem) {
@@ -387,17 +443,18 @@ export default function AdminUsersPage() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Password *
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
                   value={form.password}
                   onChange={(e) =>
                     setForm({ ...form, password: e.target.value })
                   }
                   required
+                  autoComplete="new-password"
                   className={inputCls}
                   placeholder="Min 8 characters"
                   minLength={8}
                 />
+                <p className="text-[11px] text-gray-400 mt-1">{PASSWORD_HINT}</p>
               </div>
             )}
             <div className="sm:col-span-2 flex gap-3">
@@ -478,18 +535,28 @@ export default function AdminUsersPage() {
                       {u.role}
                     </span>
                   </div>
-                  <button
-                    onClick={() => openEdit(u)}
-                    disabled={!canEditTarget(u)}
-                    title={
-                      canEditTarget(u)
-                        ? undefined
-                        : "You can't modify this account"
-                    }
-                    className="px-3 py-1.5 text-xs font-medium text-brand-700 bg-brand-50 rounded-lg hover:bg-brand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {u.role === "CUSTOMER" ? "Upgrade role" : "Edit role"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {canResetTarget(u) && (
+                      <button
+                        onClick={() => openReset(u)}
+                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors"
+                      >
+                        Reset password
+                      </button>
+                    )}
+                    <button
+                      onClick={() => openEdit(u)}
+                      disabled={!canEditTarget(u)}
+                      title={
+                        canEditTarget(u)
+                          ? undefined
+                          : "You can't modify this account"
+                      }
+                      className="px-3 py-1.5 text-xs font-medium text-brand-700 bg-brand-50 rounded-lg hover:bg-brand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {u.role === "CUSTOMER" ? "Upgrade role" : "Edit role"}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -628,6 +695,15 @@ export default function AdminUsersPage() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                       )}
+                      {canResetTarget(u) && (
+                        <button
+                          onClick={() => openReset(u)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                          title="Reset password"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </button>
+                      )}
                       {canDelete && (
                         <button
                           onClick={() => handleDelete(u.id, u.name)}
@@ -645,6 +721,122 @@ export default function AdminUsersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* ── Reset password dialog ─────────────────────────────────────── */}
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <form
+            onSubmit={submitReset}
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-bold text-gray-900">Reset password</h2>
+                <p className="text-sm text-gray-500 truncate">
+                  {resetTarget.name} · {resetTarget.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetTarget(null)}
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {(
+                [
+                  ["set", "Set a new password"],
+                  ["link", "Email a reset link"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setResetMode(value)}
+                  className={`px-3 py-2 rounded-xl border font-medium transition-colors ${
+                    resetMode === value
+                      ? "border-brand-500 bg-brand-50 text-brand-700"
+                      : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {resetMode === "set" ? (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-600">
+                  New password
+                </label>
+                <PasswordInput
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className={inputCls}
+                  placeholder="New password"
+                  autoFocus
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setResetPassword(generatePassword())}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" /> Generate
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!resetPassword}
+                    onClick={() => {
+                      navigator.clipboard?.writeText(resetPassword);
+                      toast("Password copied", "success");
+                    }}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-40"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> Copy
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400">{PASSWORD_HINT}</p>
+                <p className="text-[11px] text-amber-600">
+                  Share it with the user securely — it is not shown again after
+                  you save. They are signed out of every device.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600">
+                We will email {resetTarget.email} a link, valid for 1 hour, to
+                choose their own new password. Their current password keeps
+                working until they use it.
+              </p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setResetTarget(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={resetting}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-60"
+              >
+                {resetting
+                  ? "Working…"
+                  : resetMode === "set"
+                    ? "Set password"
+                    : "Send link"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

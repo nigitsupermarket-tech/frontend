@@ -6,7 +6,9 @@ import { useForm } from "react-hook-form";
 import { Loader2, Save, ChevronLeft } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { useToast } from "@/store/uiStore";
-import { apiPut, apiPost, getApiError } from "@/lib/api";
+import { apiPut, getApiError } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
+import { PasswordInput } from "@/components/shared/password-input";
 import {
   updatePasswordSchema,
   type UpdatePasswordForm,
@@ -18,6 +20,7 @@ export default function ProfilePage() {
   const { user, setUser } = useAuthStore();
   const router = useRouter();
   const toast = useToast();
+  const { logout } = useAuth();
   const [profileSaving, setProfileSaving] = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
   const [profile, setProfile] = useState({
@@ -51,12 +54,16 @@ export default function ProfilePage() {
   const changePassword = async (data: UpdatePasswordForm) => {
     setPwSaving(true);
     try {
-      await apiPost("/auth/update-password", {
+      // The endpoint is PUT — this used to POST, which the server rejected,
+      // so customers could never change their password from here.
+      await apiPut("/auth/update-password", {
         currentPassword: data.currentPassword,
         newPassword: data.newPassword,
       });
-      toast("Password updated successfully", "success");
+      toast("Password updated — please sign in again", "success");
       reset();
+      // The server ends the session when the password changes.
+      setTimeout(() => logout(), 1500);
     } catch (err) {
       toast(getApiError(err), "error");
     } finally {
@@ -145,8 +152,8 @@ export default function ProfilePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 {label}
               </label>
-              <input
-                type="password"
+              <PasswordInput
+                autoComplete={name === "currentPassword" ? "current-password" : "new-password"}
                 {...register(name as any)}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               />
