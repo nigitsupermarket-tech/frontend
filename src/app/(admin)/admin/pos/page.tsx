@@ -39,6 +39,7 @@ import { formatPrice, formatScaleQty, getProductImage } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 import { useDraftSync } from "@/hooks/useDraftSync";
 import { useCatalogSync } from "@/hooks/useCatalogSync";
+import { normalizeBarcode } from "@/lib/barcode";
 import {
   lookupByBarcode,
   lookupBySku,
@@ -1329,10 +1330,10 @@ function POSPageInner() {
         // specific variation's dedicated barcode (e.g. a pre-labeled
         // "500g Pack" sticker) — route straight to that preset.
         const matchedVariation =
-          product.barcode === code
+          normalizeBarcode(product.barcode) === code
             ? undefined
             : (product.variations || []).find(
-                (v: ProductVariation) => v.barcode === code,
+                (v: ProductVariation) => normalizeBarcode(v.barcode) === code,
               );
         addOrPickVariation(product, matchedVariation, true);
       } else

@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { generateSlug, generateSKU } from "@/lib/utils";
 import { Category, Brand } from "@/types";
 import { PageLoader } from "@/components/shared/loading-spinner";
+import { normalizeBarcode } from "@/lib/barcode";
 import { DragDropMediaUploader } from "@/components/shared/drag-drop-media-uploader";
 
 // A structured, labeled preset of a scalable product — e.g. "500g Pack",
@@ -715,7 +716,7 @@ export default function ProductForm({ productId, onSave }: Props) {
         setActiveTab("scalable");
         return;
       }
-      const barcodes = activeVariations.map((v) => v.barcode.trim()).filter(Boolean);
+      const barcodes = activeVariations.map((v) => normalizeBarcode(v.barcode)).filter(Boolean);
       const dupBarcode = barcodes.find((b, i) => barcodes.indexOf(b) !== i);
       if (dupBarcode) {
         toast.error(`Barcode "${dupBarcode}" is used by more than one variation on this product`);
@@ -770,7 +771,7 @@ export default function ProductForm({ productId, onSave }: Props) {
             : undefined,
           costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
           sku: form.sku,
-          barcode: form.barcode || undefined,
+          barcode: normalizeBarcode(form.barcode) || undefined,
           categoryId: form.categoryId,
           brandId: form.brandId || undefined,
           tags: form.tags
@@ -954,7 +955,7 @@ export default function ProductForm({ productId, onSave }: Props) {
               quantity: parseFloat(v.quantity),
               price: parseFloat(v.price),
               compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
-              barcode: v.barcode.trim() || null,
+              barcode: normalizeBarcode(v.barcode) || null,
               stockQuantity: v.id
                 ? (originalVariationStockRef.current[v.id] ?? null)
                 : v.dedicatedStock && v.stockQuantity !== ""
@@ -1002,7 +1003,7 @@ export default function ProductForm({ productId, onSave }: Props) {
                 compareAtPrice: v.compareAtPrice
                   ? parseFloat(v.compareAtPrice)
                   : null,
-                barcode: v.barcode.trim() || null,
+                barcode: normalizeBarcode(v.barcode) || null,
                 stockQuantity:
                   v.dedicatedStock && v.stockQuantity !== ""
                     ? parseFloat(v.stockQuantity)

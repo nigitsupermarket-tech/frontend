@@ -84,6 +84,8 @@ export type ScaleBarcodeError =
 const DB_NAME = "calstins-pos-cache";
 const DB_VERSION = 1;
 const STORE_PRODUCTS = "products";
+import { normalizeBarcode } from "./barcode";
+
 const STORE_BARCODES = "barcodeIndex"; // code -> { productId, variationId | null }
 const STORE_META = "meta";
 
@@ -178,11 +180,11 @@ async function ensureMemoryLoaded(): Promise<void> {
             const p: CachedProduct = cursor.value;
             memProducts.set(p.id, p);
             if (p.barcode) {
-              memBarcodeIndex.set(p.barcode, { productId: p.id, variationId: null });
+              memBarcodeIndex.set(normalizeBarcode(p.barcode), { productId: p.id, variationId: null });
             }
             for (const v of p.variations || []) {
               if (v.barcode && v.isActive) {
-                memBarcodeIndex.set(v.barcode, { productId: p.id, variationId: v.id });
+                memBarcodeIndex.set(normalizeBarcode(v.barcode), { productId: p.id, variationId: v.id });
               }
             }
             cursor.continue();
@@ -239,17 +241,17 @@ async function upsertProducts(products: CachedProduct[]): Promise<void> {
   for (const p of products) {
     if (!isSellable(p)) {
       memProducts.delete(p.id);
-      if (p.barcode) memBarcodeIndex.delete(p.barcode);
+      if (p.barcode) memBarcodeIndex.delete(normalizeBarcode(p.barcode));
       for (const v of p.variations || []) {
-        if (v.barcode) memBarcodeIndex.delete(v.barcode);
+        if (v.barcode) memBarcodeIndex.delete(normalizeBarcode(v.barcode));
       }
       continue;
     }
     memProducts.set(p.id, p);
-    if (p.barcode) memBarcodeIndex.set(p.barcode, { productId: p.id, variationId: null });
+    if (p.barcode) memBarcodeIndex.set(normalizeBarcode(p.barcode), { productId: p.id, variationId: null });
     for (const v of p.variations || []) {
       if (v.barcode && v.isActive) {
-        memBarcodeIndex.set(v.barcode, { productId: p.id, variationId: v.id });
+        memBarcodeIndex.set(normalizeBarcode(v.barcode), { productId: p.id, variationId: v.id });
       }
     }
   }
@@ -264,19 +266,19 @@ async function upsertProducts(products: CachedProduct[]): Promise<void> {
     for (const p of products) {
       if (!isSellable(p)) {
         productStore.delete(p.id);
-        if (p.barcode) barcodeStore.delete(p.barcode);
+        if (p.barcode) barcodeStore.delete(normalizeBarcode(p.barcode));
         for (const v of p.variations || []) {
-          if (v.barcode) barcodeStore.delete(v.barcode);
+          if (v.barcode) barcodeStore.delete(normalizeBarcode(v.barcode));
         }
         continue;
       }
       productStore.put(p);
       if (p.barcode) {
-        barcodeStore.put({ code: p.barcode, productId: p.id, variationId: null });
+        barcodeStore.put({ code: normalizeBarcode(p.barcode), productId: p.id, variationId: null });
       }
       for (const v of p.variations || []) {
         if (v.barcode && v.isActive) {
-          barcodeStore.put({ code: v.barcode, productId: p.id, variationId: v.id });
+          barcodeStore.put({ code: normalizeBarcode(v.barcode), productId: p.id, variationId: v.id });
         }
       }
     }
@@ -345,7 +347,7 @@ export interface LookupResult {
 
 export async function lookupByBarcode(code: string): Promise<LookupResult | null> {
   await ensureMemoryLoaded();
-  const entry = memBarcodeIndex.get(code);
+  const entry = memBarcodeIndex.get(normalizeBarcode(code));
   if (!entry) return null;
   const product = memProducts.get(entry.productId);
   if (!product) return null;
