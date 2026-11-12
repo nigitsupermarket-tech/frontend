@@ -2,6 +2,7 @@
 // frontend/src/app/(admin)/admin/pos/page.tsx
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   Search,
   Barcode,
@@ -909,6 +910,185 @@ export default function POSPage() {
 
 // Small "5m ago" formatter for the catalog-sync status line — deliberately
 // coarse (no seconds granularity) since it's a trust indicator, not a clock.
+// ─── Resizable split + per-panel text size ───────────────────────────────────
+// Cart width is stored as a % of the split container so it survives window
+// resizes; text size is a CSS `zoom` factor per panel. Both persist per
+// browser in localStorage.
+const SPLIT_STORAGE_KEY = "pos.layout.v1";
+const DEFAULT_CART_PCT = 42.8571;
+const MIN_CART_PX = 320;
+const MIN_LEFT_PX = 360;
+const ZOOM_STEPS = [0.85, 1, 1.15, 1.3, 1.5, 1.75];
+
+function nearestZoomIndex(z: unknown): number {
+  const n = typeof z === "number" ? z : 1;
+  let best = 1;
+  ZOOM_STEPS.forEach((step, i) => {
+    if (Math.abs(step - n) < Math.abs(ZOOM_STEPS[best] - n)) best = i;
+  });
+  return best;
+}
+
+function useResizableSplit() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [cartPct, setCartPct] = useState(DEFAULT_CART_PCT);
+  const [leftZoomIdx, setLeftZoomIdx] = useState(1);
+  const [rightZoomIdx, setRightZoomIdx] = useState(1);
+  const [dragging, setDragging] = useState(false);
+  const loaded = useRef(false);
+
+  // Load saved layout after mount (avoids SSR/hydration mismatch)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SPLIT_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (
+          typeof saved.cartPct === "number" &&
+          saved.cartPct > 10 &&
+          saved.cartPct < 90
+        ) {
+          setCartPct(saved.cartPct);
+        }
+        setLeftZoomIdx(nearestZoomIndex(saved.leftZoom));
+        setRightZoomIdx(nearestZoomIndex(saved.rightZoom));
+      }
+    } catch {
+      /* ignore corrupt/blocked storage */
+    }
+    loaded.current = true;
+  }, []);
+
+  // Persist (not while dragging — saved once on release)
+  useEffect(() => {
+    if (!loaded.current || dragging) return;
+    try {
+      localStorage.setItem(
+        SPLIT_STORAGE_KEY,
+        JSON.stringify({
+          cartPct,
+          leftZoom: ZOOM_STEPS[leftZoomIdx],
+          rightZoom: ZOOM_STEPS[rightZoomIdx],
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [cartPct, leftZoomIdx, rightZoomIdx, dragging]);
+
+  const setFromClientX = useCallback((clientX: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const maxCart = Math.max(MIN_CART_PX, rect.width - MIN_LEFT_PX);
+    const cartPx = Math.min(maxCart, Math.max(MIN_CART_PX, rect.right - clientX));
+    setCartPct((cartPx / rect.width) * 100);
+  }, []);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragging) setFromClientX(e.clientX);
+  };
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    setDragging(false);
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  };
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "ArrowLeft") setCartPct((p) => Math.min(80, p + 2));
+    else if (e.key === "ArrowRight") setCartPct((p) => Math.max(15, p - 2));
+    else if (e.key === "Home") setCartPct(DEFAULT_CART_PCT);
+    else return;
+    e.preventDefault();
+  };
+  const reset = () => setCartPct(DEFAULT_CART_PCT);
+
+  // Safety: never leave the body locked if unmounted mid-drag
+  useEffect(
+    () => () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    },
+    [],
+  );
+
+  return {
+    containerRef,
+    cartPct,
+    dragging,
+    dividerProps: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: endDrag,
+      onPointerCancel: endDrag,
+      onDoubleClick: reset,
+      onKeyDown,
+    },
+    leftZoom: ZOOM_STEPS[leftZoomIdx],
+    rightZoom: ZOOM_STEPS[rightZoomIdx],
+    leftZoomIdx,
+    rightZoomIdx,
+    setLeftZoomIdx,
+    setRightZoomIdx,
+  };
+}
+
+function TextSizeControl({
+  index,
+  onChange,
+  label,
+}: {
+  index: number;
+  onChange: (i: number) => void;
+  label: string;
+}) {
+  const max = ZOOM_STEPS.length - 1;
+  return (
+    <div
+      className="flex items-center rounded border border-gray-200 bg-white overflow-hidden flex-shrink-0"
+      role="group"
+      aria-label={`${label} text size`}
+    >
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(0, index - 1))}
+        disabled={index === 0}
+        title={`Smaller text (${label})`}
+        className="px-2 py-1 text-[11px] font-bold text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        A−
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(1)}
+        title="Reset text size"
+        className="px-1.5 py-1 text-[10px] font-semibold text-gray-500 hover:bg-gray-100 border-x border-gray-200 tabular-nums min-w-[38px]"
+      >
+        {Math.round(ZOOM_STEPS[index] * 100)}%
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, index + 1))}
+        disabled={index === max}
+        title={`Larger text (${label})`}
+        className="px-2 py-1 text-[13px] font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        A+
+      </button>
+    </div>
+  );
+}
+
 function formatRelativeSync(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
@@ -922,6 +1102,7 @@ function POSPageInner() {
   const { user } = useAuthStore();
   const scale = useScale();
   const toast = useToast();
+  const split = useResizableSplit();
 
   // Offline product cache — see lib/posOfflineCache.ts. Keeps the full
   // sellable catalog in IndexedDB so every scan/search resolves instantly
@@ -2119,9 +2300,13 @@ function POSPageInner() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div ref={split.containerRef} className="flex flex-1 overflow-hidden">
         {/* ── LEFT: Product Search + Visual Grid ── */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white border-r border-gray-200 relative">
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-white relative">
+          <div
+            className="flex-1 min-h-0 flex flex-col overflow-hidden relative"
+            style={{ zoom: split.leftZoom }}
+          >
           {/* ✅ FIX 3: Tab toggle — Search/Scan vs Quick-Add Grid */}
           <div className="flex border-b border-gray-200 bg-gray-50 flex-shrink-0">
             <button
@@ -2144,6 +2329,13 @@ function POSPageInner() {
             >
               <Grid3x3 className="w-3.5 h-3.5" /> Quick-Add Grid
             </button>
+            <div className="flex items-center px-2 border-l border-gray-200">
+              <TextSizeControl
+                label="left panel"
+                index={split.leftZoomIdx}
+                onChange={split.setLeftZoomIdx}
+              />
+            </div>
           </div>
 
           {/* ── SEARCH MODE ── */}
@@ -2479,6 +2671,30 @@ function POSPageInner() {
               </div>
             </div>
           )}
+          </div>
+        </div>
+
+        {/* ── Draggable divider ── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize product and cart panels (double-click to reset)"
+          tabIndex={0}
+          {...split.dividerProps}
+          style={{ touchAction: "none" }}
+          className={`group relative w-1.5 flex-shrink-0 cursor-col-resize select-none outline-none transition-colors ${
+            split.dragging
+              ? "bg-green-500"
+              : "bg-gray-200 hover:bg-green-400 focus-visible:bg-green-400"
+          }`}
+        >
+          <span
+            className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-10 w-1 rounded-full ${
+              split.dragging ? "bg-white" : "bg-gray-400 group-hover:bg-white"
+            }`}
+          />
+          {/* wider invisible hit area for fingers / imprecise mice */}
+          <span className="absolute inset-y-0 -left-2 -right-2" />
         </div>
 
         {/* ── RIGHT: Cart ──
@@ -2487,7 +2703,18 @@ function POSPageInner() {
             it naturally takes the remaining 4/7. min-w keeps the cart
             from getting crushed narrower than the old 420px on small
             windows. */}
-        <div className="w-[42.8571%] min-w-[420px] flex-shrink-0 flex flex-col bg-white overflow-hidden">
+        <div
+          className="flex-shrink-0 flex flex-col bg-white overflow-hidden"
+          style={{
+            width: `${split.cartPct}%`,
+            minWidth: 320,
+            maxWidth: "calc(100% - 360px)",
+          }}
+        >
+          <div
+            className="flex-1 min-h-0 flex flex-col overflow-hidden"
+            style={{ zoom: split.rightZoom }}
+          >
           <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-4 h-4 text-gray-600" />
@@ -2495,14 +2722,21 @@ function POSPageInner() {
                 Cart ({cart.length})
               </span>
             </div>
-            {cart.length > 0 && (
-              <button
-                onClick={() => clearCart()}
-                className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
-              >
-                <RotateCcw className="w-3 h-3" /> Clear
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              <TextSizeControl
+                label="cart"
+                index={split.rightZoomIdx}
+                onChange={split.setRightZoomIdx}
+              />
+              {cart.length > 0 && (
+                <button
+                  onClick={() => clearCart()}
+                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" /> Clear
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Customer type */}
@@ -2680,6 +2914,7 @@ function POSPageInner() {
                 <PauseCircle className="w-4 h-4" /> Hold Transaction
               </button>
             </div>
+          </div>
           </div>
         </div>
       </div>
