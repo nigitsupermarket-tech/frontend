@@ -593,7 +593,7 @@ function queuePrint(win: Window, onDone?: () => void) {
 // but that's the "cut at the end of each receipt" behavior that was
 // actually asked for — and it's a much less fragile default than relying
 // on every printer driver correctly honoring an unbounded @page height.
-export function printBothReceipts(
+function printBothReceiptsViaBrowser(
   order: POSOrder,
   onAllDone?: () => void,
   onError?: (message: string) => void,
@@ -677,35 +677,39 @@ async function tryPrintViaAgent(order: POSOrder): Promise<boolean> {
   }
 }
 
-export function printBothReceiptsSmart(
+// THE SINGLE PRINT ENTRY POINT — every Print button in the app calls this.
+//
+// ROOT-CAUSE FIX for "long receipts get cut in the middle": the buttons
+// used to call the browser path (printBothReceiptsViaBrowser) directly,
+// and this function used to send the desktop app back to that same path
+// on the assumption that window.print() *is* the desktop bridge. It is
+// not: in the Calstins POS Bridge, preload.js reroutes window.print() to
+// Chromium's silent print → the Windows printer driver, which is page-
+// based and has a hard max page length (297mm on this printer). Past
+// that the driver paginates and the auto-cutter fires mid-receipt. The
+// bridge's real raw ESC/POS server (POST /print on 127.0.0.1:9142) has
+// no page concept at all — it was never being called.
+//
+// So: ALWAYS try the raw bridge first, in the desktop app and in a plain
+// browser alike, and only fall back to the browser print path if the
+// bridge is unreachable or reports a failure.
+export function printBothReceipts(
   order: POSOrder,
   onAllDone?: () => void,
   onError?: (message: string) => void,
 ) {
-  // Electron is the intended POS printing bridge. Prefer it directly so a
-  // successful desktop print request is never followed by a second browser
-  // print path. The shared printBothReceipts() function detects the bridge
-  // on each print window and calls silentPrint().
-  const desktop = (
-    window as unknown as {
-      posDesktop?: { isDesktopApp?: boolean };
-    }
-  ).posDesktop;
-
-  if (desktop?.isDesktopApp) {
-    printBothReceipts(order, onAllDone, onError);
-    return;
-  }
-
   tryPrintViaAgent(order).then((ok) => {
     if (ok) {
       onAllDone?.();
       return;
     }
-    // Only use the browser fallback when the local agent request clearly
-    // failed. The agent timeout is deliberately generous because an aborted
-    // HTTP request can otherwise race with a print that the agent already
-    // accepted, producing duplicate receipts.
-    printBothReceipts(order, onAllDone, onError);
+    // Only fall back when the bridge request clearly failed. The timeout
+    // is deliberately generous because aborting an HTTP request that the
+    // bridge already accepted would otherwise race with a print it is
+    // still doing, producing duplicate receipts.
+    printBothReceiptsViaBrowser(order, onAllDone, onError);
   });
 }
+
+// Kept for backwards compatibility with any older import.
+export const printBothReceiptsSmart = printBothReceipts;
