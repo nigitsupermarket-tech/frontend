@@ -38,6 +38,7 @@ import {
   printOnlineOrderInvoice,
   downloadOnlineInvoicePdf,
 } from "@/lib/printOnlineInvoice";
+import { usePrintShortcut } from "@/hooks/usePrintShortcut";
 import Image from "next/image";
 
 const ORDER_STATUSES = [
@@ -270,6 +271,9 @@ export default function AdminOrderDetailPage() {
     setPrinting(true);
     printOnlineOrderInvoice(order, settings, () => setPrinting(false));
   };
+
+  // Ctrl+P prints this order's invoice (same as the Print button).
+  usePrintShortcut(order ? printInvoice : null);
 
   if (isLoading) return <PageLoader />;
   if (error || !order)

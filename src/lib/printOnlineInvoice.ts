@@ -13,6 +13,7 @@
 // inconsistent about which one dispatches `afterprint`).
 import type { Order } from "@/types";
 import type { SiteSettings } from "@/types";
+import { printViaBridge } from "./posReceipt";
 import {
   type ReceiptLine,
   downloadReceiptPdf,
@@ -251,7 +252,97 @@ function printAndClose(win: Window, onDone: () => void) {
   }, 250);
 }
 
+// Plain-ASCII money for the raw ESC/POS printer — thermal printers'
+// default code page has no Naira glyph, so it prints as "N" (same
+// convention the desktop bridge already uses for POS receipts).
+function bridgeMoney(n: number): string {
+  return `N${Math.round(n || 0).toLocaleString("en-NG")}`;
+}
+
+// Maps an online Order onto the shape the desktop print bridge's
+// /print endpoint understands (see pos-desktop receiptFormatter.js). The
+// bridge prints exactly the same information the HTML invoice above does:
+// order number, customer, items, subtotal/discount/shipping/total,
+// payment, status, and the delivery address.
+export function buildOnlineBridgeOrder(order: Order) {
+  const addr = (order.shippingAddress as any) || {};
+  const shipName =
+    addr.fullName || `${addr.firstName || ""} ${addr.lastName || ""}`.trim();
+
+  const extraRows: { label: string; value: string }[] = [
+    { label: "Subtotal", value: bridgeMoney(order.subtotal) },
+  ];
+  if (order.discountAmount > 0) {
+    extraRows.push({
+      label: "Discount",
+      value: `-${bridgeMoney(order.discountAmount)}`,
+    });
+  }
+  extraRows.push({ label: "Shipping", value: bridgeMoney(order.shippingCost) });
+
+  const detailLines: string[] = [
+    `Status: ${ORDER_STATUS_LABELS[order.status] || order.status}`,
+  ];
+  if (!order.isPickup) {
+    detailLines.push(
+      "--",
+      "Ship to:",
+      shipName,
+      String(addr.address || addr.addressLine1 || ""),
+      [addr.city, addr.state].filter(Boolean).join(", "),
+    );
+  }
+
+  return {
+    receiptNumber: `Order #${order.orderNumber}`,
+    createdAt: new Date(order.createdAt).toISOString(),
+    customerName: order.customerName,
+    customerPhone: order.customerPhone || undefined,
+    paymentMethod: `${
+      order.paymentMethod === "BANK_TRANSFER"
+        ? "Bank Transfer"
+        : order.paymentMethod
+    } (${order.paymentStatus})`,
+    discountAmount: 0, // shown in extraRows instead, so it is not printed twice
+    total: order.total,
+    items: (order.items || []).map((item: any) => ({
+      productName: item.product?.name || "Item",
+      quantity: item.quantity,
+      unitPrice: item.price,
+      subtotal: item.price * item.quantity,
+      discountApplied: 0,
+    })),
+    extraRows,
+    detailLines,
+  };
+}
+
+// THE ONLINE-ORDER PRINT ENTRY POINT.
+//
+// ROOT-CAUSE FIX for "printing from the order is faded (unlike the POS)":
+// this used to ALWAYS go through the browser path below — HTML rendered
+// in a popup and printed through the Windows printer driver. That
+// rasterises anti-aliased grey text, which a thermal head prints as pale,
+// faded dots, and it is page-based (so it also has the cut-in-the-middle
+// problem on long orders). POS receipts go through the raw ESC/POS print
+// bridge instead: crisp, bold, no page length. Online orders now use that
+// same bridge first and only fall back to the browser path if the bridge
+// is unreachable or reports a failure.
 export function printOnlineOrderInvoice(
+  order: Order,
+  settings?: Partial<SiteSettings>,
+  onDone?: () => void,
+) {
+  printViaBridge(buildOnlineBridgeOrder(order), ["ONLINE ORDER"]).then((ok) => {
+    if (ok) {
+      onDone?.();
+      return;
+    }
+    printOnlineOrderInvoiceViaBrowser(order, settings, onDone);
+  });
+}
+
+function printOnlineOrderInvoiceViaBrowser(
   order: Order,
   settings?: Partial<SiteSettings>,
   onDone?: () => void,

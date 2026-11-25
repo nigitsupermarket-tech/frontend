@@ -53,6 +53,10 @@ import { ScaleProvider, useScale } from "@/lib/scale/ScaleContext";
 import ScalePanel from "@/components/admin/pos/ScalePanel";
 import WeighModal from "@/components/admin/pos/WeighModal";
 import { printBothReceipts } from "@/lib/posReceipt";
+import {
+  usePrintShortcut,
+  forwardPrintShortcutFromIframe,
+} from "@/hooks/usePrintShortcut";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ProductVariation {
@@ -2110,6 +2114,10 @@ function POSPageInner() {
     printBothReceipts(printOrder);
   };
 
+  // Ctrl+P prints the receipt that is on screen — same function as the
+  // Print button. Only active while the receipt modal is open.
+  usePrintShortcut(showReceipt && completedOrder ? printCurrentReceipt : null);
+
   const processPayment = async () => {
     if (cart.length === 0) {
       toast("Cart is empty", "error");
@@ -3139,8 +3147,12 @@ function POSPageInner() {
       {/* ── Receipt Modal ── */}
       {showReceipt && completedOrder && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b">
+          {/* max-h + flex-col: a long receipt scrolls INSIDE the card while
+              the header and the Print / New Sale buttons stay pinned and
+              always visible. Without this the card grew taller than the
+              screen and the buttons were pushed off the bottom, unreachable. */}
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <span className="font-bold text-gray-900">
@@ -3151,7 +3163,7 @@ function POSPageInner() {
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
-            <div id="receipt-content" className="p-5 font-mono text-xs">
+            <div id="receipt-content" className="p-5 font-mono text-xs flex-1 min-h-0 overflow-y-auto">
               <div className="text-center mb-3">
                 <p className="font-bold text-base">NigitTriple Supermarket</p>
                 <p className="text-gray-500">
@@ -3246,7 +3258,7 @@ function POSPageInner() {
                 </p>
               </div>
             </div>
-            <div className="p-4 border-t flex gap-3">
+            <div className="p-4 border-t flex gap-3 shrink-0 bg-white">
               <button
                 onClick={() => printCurrentReceipt()}
                 className="flex-1 flex items-center justify-center gap-2 py-3 bg-gray-900 text-white font-bold rounded-lg hover:bg-gray-800"

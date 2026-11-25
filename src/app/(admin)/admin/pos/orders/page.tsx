@@ -27,6 +27,10 @@ import {
   downloadPosReceiptPdf,
   buildBothReceiptsHtml,
 } from "@/lib/posReceipt";
+import {
+  usePrintShortcut,
+  forwardPrintShortcutFromIframe,
+} from "@/hooks/usePrintShortcut";
 
 interface DayStats {
   totalOrders: number;
@@ -87,6 +91,17 @@ export default function POSOrdersPage() {
       (message) => toast(message, "error"),
     );
   };
+
+  // Ctrl+P prints the order shown in the preview modal.
+  usePrintShortcut(
+    previewOrder
+      ? () => {
+          const order = previewOrder;
+          handlePrint(order);
+          setPreviewOrder(null);
+        }
+      : null,
+  );
 
   const handleDownload = (order: POSOrder) => {
     downloadPosReceiptPdf(order, (message) => toast(message, "error"));
@@ -471,6 +486,7 @@ export default function POSOrdersPage() {
                 srcDoc={buildBothReceiptsHtml(previewOrder)}
                 className="w-full bg-white rounded-lg border border-gray-200"
                 style={{ height: "60vh" }}
+                onLoad={(e) => forwardPrintShortcutFromIframe(e.currentTarget)}
               />
             </div>
 

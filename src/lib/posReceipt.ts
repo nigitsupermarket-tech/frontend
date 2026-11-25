@@ -654,7 +654,22 @@ const PRINT_AGENT_URL =
   process.env.NEXT_PUBLIC_PRINT_AGENT_URL || "http://127.0.0.1:9142";
 const PRINT_AGENT_TIMEOUT_MS = 10000;
 
-async function tryPrintViaAgent(order: POSOrder): Promise<boolean> {
+// Exported so other receipt types (e.g. online-order invoices in
+// printOnlineInvoice.ts) can use the SAME raw ESC/POS bridge instead of
+// the page-based browser print path. Resolves true only if the bridge
+// confirmed the job; false means "bridge unreachable or failed" and the
+// caller should use its own fallback.
+export async function printViaBridge(
+  order: unknown,
+  copies: string[] = ["MERCHANT COPY", "CUSTOMER COPY"],
+): Promise<boolean> {
+  return tryPrintViaAgent(order, copies);
+}
+
+async function tryPrintViaAgent(
+  order: unknown,
+  copies: string[] = ["MERCHANT COPY", "CUSTOMER COPY"],
+): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PRINT_AGENT_TIMEOUT_MS);
   try {
@@ -663,7 +678,7 @@ async function tryPrintViaAgent(order: POSOrder): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         order,
-        copies: ["MERCHANT COPY", "CUSTOMER COPY"],
+        copies,
       }),
       signal: controller.signal,
     });

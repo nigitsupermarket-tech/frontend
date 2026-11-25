@@ -56,6 +56,10 @@ import {
   downloadPosReceiptPdf,
   buildBothReceiptsHtml,
 } from "@/lib/posReceipt";
+import {
+  usePrintShortcut,
+  forwardPrintShortcutFromIframe,
+} from "@/hooks/usePrintShortcut";
 
 const FETCH_TIMEOUT_MS = 12_000;
 
@@ -168,6 +172,9 @@ export default function POSOrderDetailPage() {
       (message) => toast(message, "error"),
     );
   };
+
+  // Ctrl+P prints this order (same as the Print button in the preview).
+  usePrintShortcut(order ? handlePrint : null);
 
   const handleDownload = () => {
     if (!order) return;
@@ -517,6 +524,7 @@ export default function POSOrderDetailPage() {
                 srcDoc={buildBothReceiptsHtml(order)}
                 className="w-full bg-white rounded-lg border border-gray-200"
                 style={{ height: "60vh" }}
+                onLoad={(e) => forwardPrintShortcutFromIframe(e.currentTarget)}
               />
             </div>
             <div className="flex gap-2 px-5 py-4 border-t border-gray-100">
